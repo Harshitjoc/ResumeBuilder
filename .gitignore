@@ -1,0 +1,23 @@
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env
+
+# Backend
+backend/.venv/
+backend/**/__pycache__/
+backend/.env
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Supabase
+.supabase/
+
+# Agent skills library (not part of the project)
+.agents/
