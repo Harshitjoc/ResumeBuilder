@@ -53,6 +53,54 @@ export async function getSession() {
   return supabase.auth.getSession()
 }
 
+export async function getAccessToken(): Promise<string | null> {
+  if (!supabase) return null
+  const { data } = await supabase.auth.getSession()
+  return data.session?.access_token ?? null
+}
+
+export async function linkEmailToAccount(
+  email: string,
+  password: string,
+  fullName?: string,
+) {
+  if (!supabase)
+    return { data: { user: null }, error: { message: 'Supabase not configured' } as any }
+  return supabase.auth.updateUser({
+    email,
+    password,
+    data: fullName ? { full_name: fullName } : undefined,
+  })
+}
+
+export async function claimAnonymousRows(anonToken: string): Promise<Record<string, unknown>> {
+  const token = await getAccessToken()
+  if (!token) throw new Error('Not signed in')
+  const base = import.meta.env.VITE_API_URL || ''
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  }
+  const res = await fetch(`${base}/api/auth/claim-anonymous`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ anon_token: anonToken }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let message = text
+    try {
+      const parsed = JSON.parse(text)
+      const detail = parsed?.detail
+      message = typeof detail === 'string' ? detail : detail?.detail ?? text
+    } catch {
+      /* keep raw text */
+    }
+    throw new Error(message || `Claim failed: ${res.status}`)
+  }
+  return res.json() as Promise<Record<string, unknown>>
+}
+
 export function onAuthStateChange(
   callback: (event: string, session: Session | null) => void,
 ) {

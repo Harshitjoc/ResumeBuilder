@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
 from app.config import CORS_ORIGINS
-from app.routers import admin, ats, jobs, llm, me, payments, shares, upload
+from app.routers import admin, ats, auth, jobs, llm, me, payments, shares, upload
 
 app = FastAPI(title="Resume Builder API", version="0.1.0")
 
@@ -25,6 +25,7 @@ app.include_router(ats.router)
 app.include_router(jobs.router)
 app.include_router(me.router)
 app.include_router(admin.router)
+app.include_router(auth.router)
 
 
 @app.get("/api/health")

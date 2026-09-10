@@ -1,4 +1,5 @@
 import { getClientKey, getUserId } from '@/services/clientKey'
+import { getAccessToken } from '@/services/supabase'
 import { useAppStore } from '@/store/appStore'
 import type {
   ResumeData,
@@ -35,6 +36,10 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   headers.set('X-Client-Key', getClientKey())
   const userId = getUserId()
   if (userId) headers.set('X-User-Id', userId)
+  if (!headers.has('Authorization')) {
+    const token = await getAccessToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+  }
 
   const res = await fetch(`${BASE}${path}`, { ...init, headers })
   if (!res.ok) {

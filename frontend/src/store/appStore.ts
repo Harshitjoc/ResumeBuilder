@@ -77,6 +77,7 @@ interface AppState {
   setApplications: (applications: ApplicationRecord[]) => void
   addShare: (data: Omit<ShareRecord, 'id' | 'createdAt'>) => void
   removeShare: (id: string) => void
+  setShares: (shares: ShareRecord[]) => void
   setPlan: (plan: Partial<PlanInfo>) => void
   decrementQuota: () => void
   setQuotaExceeded: (exceeded: boolean) => void
@@ -192,6 +193,7 @@ export const useAppStore = create<AppState>()(
         })),
       removeShare: (id) =>
         set((state) => ({ shares: state.shares.filter((s) => s.id !== id) })),
+      setShares: (shares) => set({ shares }),
       setPlan: (plan) => set((state) => ({ plan: { ...state.plan, ...plan } })),
       decrementQuota: () =>
         set((state) => ({

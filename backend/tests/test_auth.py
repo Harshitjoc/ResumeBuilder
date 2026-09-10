@@ -161,3 +161,103 @@ def test_require_admin_accepts_admin(monkeypatch):
     monkeypatch.setattr("app.deps._profile_role", lambda uid: "admin")
     out = _run(require_admin(_FakeRequest(), AuthContext(user_id=str(uuid.uuid4()))))
     assert out.user_id
+
+
+# ── claim-anonymous (guest conversion, existing-email path) ────────────────
+def test_claim_anonymous_requires_auth():
+    resp = client.post("/api/auth/claim-anonymous", json={"anon_token": "x"})
+    assert resp.status_code == 401
+
+
+def test_claim_anonymous_requires_non_anon():
+    resp = client.post(
+        "/api/auth/claim-anonymous",
+        json={"anon_token": "x"},
+        headers={"Authorization": f"Bearer {_token(is_anonymous=True)}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_claim_anonymous_rejects_invalid_token():
+    resp = client.post(
+        "/api/auth/claim-anonymous",
+        json={"anon_token": "not-a-jwt"},
+        headers={"Authorization": f"Bearer {_token()}"},
+    )
+    assert resp.status_code == 400
+    assert "anonymous" in resp.json()["detail"].lower()
+
+
+def test_claim_anonymous_rejects_non_anon_token():
+    token = _token(is_anonymous=False)
+    resp = client.post(
+        "/api/auth/claim-anonymous",
+        json={"anon_token": token},
+        headers={"Authorization": f"Bearer {_token()}"},
+    )
+    assert resp.status_code == 400
+
+
+def test_claim_anonymous_rejects_same_account():
+    uid = str(uuid.uuid4())
+    anon_token = _token(sub=uid, is_anonymous=True)
+    resp = client.post(
+        "/api/auth/claim-anonymous",
+        json={"anon_token": anon_token},
+        headers={"Authorization": f"Bearer {_token(sub=uid)}"},
+    )
+    assert resp.status_code == 400
+
+
+def test_claim_anonymous_migrates_rows(monkeypatch):
+    fake_result = {
+        "migrated": {"resumes": 1, "job_postings": 0, "applications": 0, "analysis_reports": 0, "evidence": 0, "shares": 0},
+        "errors": [],
+    }
+    monkeypatch.setattr(
+        "app.routers.auth.claim_anonymous_rows",
+        lambda from_uid, to_uid: fake_result,
+    )
+    anon_uid = str(uuid.uuid4())
+    anon_token = _token(sub=anon_uid, is_anonymous=True)
+    resp = client.post(
+        "/api/auth/claim-anonymous",
+        json={"anon_token": anon_token},
+        headers={"Authorization": f"Bearer {_token()}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["migrated"]["resumes"] == 1
+
+
+def test_claim_anonymous_rows_stub_client(monkeypatch):
+    from app.services.conversion import claim_anonymous_rows
+
+    class _Res:
+        data = ["row"]
+
+    class _Q:
+        def update(self, payload):
+            return self
+
+        def eq(self, k, v):
+            return self
+
+        def execute(self):
+            return _Res()
+
+    fake_sb = object.__new__(type("_SB", (), {}))
+    fake_sb.table = lambda name: _Q()
+    monkeypatch.setattr("app.services.conversion._supabase_client", lambda: fake_sb)
+
+    out = claim_anonymous_rows("anon-uid", "real-uid")
+    assert out["migrated"]["resumes"] == 1
+    assert out["errors"] == []
+
+
+def test_claim_anonymous_rows_requires_supabase(monkeypatch):
+    from app.services.conversion import claim_anonymous_rows
+
+    monkeypatch.setattr("app.services.conversion._supabase_client", lambda: None)
+    with pytest.raises(RuntimeError):
+        claim_anonymous_rows("anon-uid", "real-uid")

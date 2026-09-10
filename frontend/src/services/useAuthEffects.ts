@@ -9,6 +9,7 @@ import {
 } from '@/services/supabase'
 import { setUserId } from '@/services/clientKey'
 import { refreshPlan } from '@/services/plan'
+import { startCloudSync, resetCloudSyncState } from '@/services/cloudSync'
 import type { SessionUser } from '@/store/appStore'
 
 export function useAuthEffects() {
@@ -19,7 +20,7 @@ export function useAuthEffects() {
     if (!isSupabaseConfigured || !supabase) return
 
     const { data: { subscription } } = onAuthStateChange(async (event, session) => {
-      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         if (session?.user) {
           const u = session.user
           const user: SessionUser = {
@@ -33,6 +34,7 @@ export function useAuthEffects() {
           setUserId(u.id)
           upsertProfile(u.id, {}).catch(() => {})
           refreshPlan()
+          void startCloudSync()
         } else if (event === 'INITIAL_SESSION') {
           const { error } = await signInAnonymously()
           if (error) {
@@ -42,6 +44,7 @@ export function useAuthEffects() {
       } else if (event === 'SIGNED_OUT') {
         clearSession()
         setUserId(null)
+        resetCloudSyncState()
       }
     })
 
