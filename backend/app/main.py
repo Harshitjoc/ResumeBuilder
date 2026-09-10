@@ -5,9 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
 from app.config import CORS_ORIGINS
+from app.middleware import HardeningMiddleware
 from app.routers import admin, ats, auth, jobs, llm, me, payments, shares, upload
 
 app = FastAPI(title="Resume Builder API", version="0.1.0")
+
+app.add_middleware(HardeningMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
