@@ -12,7 +12,8 @@ import PreviewPage from '@/pages/PreviewPage'
 import ApplicationsPage from '@/pages/ApplicationsPage'
 import SharePage from '@/pages/SharePage'
 import UpgradePage from '@/pages/UpgradePage'
-import AdminApprovalsPage from '@/pages/AdminApprovalsPage'
+import AdminPage from '@/pages/AdminPage'
+import AccountPage from '@/pages/AccountPage'
 import LoginPage from '@/pages/LoginPage'
 
 export default function App() {
@@ -38,7 +39,8 @@ export default function App() {
           />
           <Route path="/share/:slug" element={<SharePage />} />
           <Route path="/upgrade" element={<UpgradePage />} />
-          <Route path="/admin" element={<AdminApprovalsPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/account" element={<AccountPage />} />
         </Route>
       </Routes>
     </ErrorBoundary>

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
-import { FileText, Briefcase, ListChecks, Eye, Home, History, LayoutGrid, Crown, ShieldCheck } from 'lucide-react'
+import { FileText, Briefcase, ListChecks, Eye, Home, History, LayoutGrid, Crown, ShieldCheck, User } from 'lucide-react'
 import AuthWidget from '@/components/AuthWidget'
 import { PersonaPicker } from '@/components/PersonaPicker'
 import { useAppStore } from '@/store/appStore'
@@ -76,6 +76,13 @@ export default function Layout() {
             >
               <ShieldCheck className="h-3.5 w-3.5" />
               Admin
+            </NavLink>
+            <NavLink
+              to="/account"
+              className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100"
+            >
+              <User className="h-3.5 w-3.5" />
+              Account
             </NavLink>
             <PersonaPicker compact />
             <AuthWidget />

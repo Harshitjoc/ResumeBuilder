@@ -10,6 +10,7 @@ export async function refreshPlan(): Promise<void> {
       quotaRemaining: me.quotaRemaining,
       quotaLimit: me.quotaLimit,
     })
+    useAppStore.getState().setRole(me.role ?? null)
   } catch {
     // Backend unreachable — keep whatever plan state we already have.
   }

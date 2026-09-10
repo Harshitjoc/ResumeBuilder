@@ -77,6 +77,9 @@ export interface MeResponse {
   quotaLimit: number | null
   quotaUnlimited: boolean
   clientKey: string
+  user_id: string
+  is_anonymous: boolean
+  role: string | null
 }
 
 export interface PaymentMeta {
@@ -125,6 +128,10 @@ export interface JobEntity {
 
 export async function getMe(): Promise<MeResponse> {
   return get('/api/me')
+}
+
+export async function deleteAccount(): Promise<{ ok: boolean }> {
+  return post('/api/account/delete', {})
 }
 
 export async function getPaymentMeta(): Promise<PaymentMeta> {

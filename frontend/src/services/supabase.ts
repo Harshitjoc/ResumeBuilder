@@ -43,9 +43,15 @@ export async function signInAnonymously() {
   return supabase.auth.signInAnonymously()
 }
 
-export async function signOut() {
+export async function signOut(scope?: 'global' | 'local' | 'others') {
   if (!supabase) return { error: null }
-  return supabase.auth.signOut()
+  return supabase.auth.signOut(scope ? { scope } : undefined)
+}
+
+export async function updatePassword(newPassword: string) {
+  if (!supabase) throw new Error('Supabase not configured')
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) throw new Error(error.message)
 }
 
 export async function getSession() {
