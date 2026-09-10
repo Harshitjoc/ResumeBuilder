@@ -25,7 +25,9 @@ const PROVIDERS = [
     id: 'ollama',
     name: 'Ollama (Local)',
     models: ['mistral', 'llama3'],
-    keyLabel: 'http://localhost:11434',
+    // 127.0.0.1 (not localhost): on Windows "localhost" can hit a Docker/WSL
+    // relay serving a different Ollama (and a different model set).
+    keyLabel: 'http://127.0.0.1:11434',
   },
 ]
 
@@ -89,17 +91,26 @@ export default function ApiKeyManager() {
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700">Model</label>
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-          >
-            {activeModels.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
+          {provider === 'ollama' ? (
+            <input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="e.g. qwen3:0.6b, llama3.1"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm"
+            />
+          ) : (
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
+              {activeModels.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
-import { FileText, Briefcase, ListChecks, ShieldCheck, KeyRound } from 'lucide-react'
+import { FileText, Briefcase, ListChecks, ShieldCheck, KeyRound, Upload, Sparkles, ClipboardCheck, Target, LayoutGrid } from 'lucide-react'
+import { PersonaPicker } from '@/components/PersonaPicker'
 
 export default function HomePage() {
   return (
@@ -10,8 +11,9 @@ export default function HomePage() {
         </h1>
         <p className="mt-4 max-w-2xl text-lg text-slate-200">
           Create a resume from scratch, tailor it to any job posting, and review every
-          AI change before it reaches an employer. Bring your own LLM key — your data
-          stays yours.
+          AI change before it reaches an employer. Verification-first by design.
+          Works for graduates, professionals, and career-switchers.
+          Bring your own LLM key — your data stays yours.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
           <Link
@@ -19,6 +21,12 @@ export default function HomePage() {
             className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow hover:bg-slate-100"
           >
             <FileText className="h-4 w-4" /> Start building
+          </Link>
+          <Link
+            to="/import"
+            className="inline-flex items-center gap-2 rounded-lg bg-white/90 px-5 py-3 text-sm font-semibold text-slate-900 shadow hover:bg-slate-100"
+          >
+            <Upload className="h-4 w-4" /> Import a resume
           </Link>
           <Link
             to="/jobs"
@@ -29,11 +37,46 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section>
+        <h2 className="mb-4 text-lg font-semibold text-slate-900">How can we help? Choose what describes you — the AI adapts.</h2>
+        <PersonaPicker />
+      </section>
+
       <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <FeatureCard
+          icon={<Upload className="h-6 w-6" />}
+          title="Import any resume"
+          desc="Upload a PDF, Word, or TXT resume (or paste text) and the AI parses it into editable, structured data you verify yourself."
+        />
         <FeatureCard
           icon={<ListChecks className="h-6 w-6" />}
           title="Verification Queue"
           desc="Every AI change is shown side by side with the original. Approve, reject, or edit — nothing is automatic."
+        />
+        <FeatureCard
+          icon={<Sparkles className="h-6 w-6" />}
+          title="Resume analysis"
+          desc="Get a 0–100 score with ATS, impact, and structure notes — plus a job-fit score when you paste a job posting."
+        />
+        <FeatureCard
+          icon={<ClipboardCheck className="h-6 w-6" />}
+          title="ATS checker"
+          desc="See how your resume scores against applicant tracking systems with keyword, structure, and formatting breakdowns."
+        />
+        <FeatureCard
+          icon={<FileText className="h-6 w-6" />}
+          title="Cover letters"
+          desc="Generate tailored cover letters for any job posting, matching your resume to the role."
+        />
+        <FeatureCard
+          icon={<Target className="h-6 w-6" />}
+          title="Interview prep"
+          desc="Get likely interview questions, company research points, talking points, and questions to ask — all tailored to you."
+        />
+        <FeatureCard
+          icon={<LayoutGrid className="h-6 w-6" />}
+          title="Application tracking"
+          desc="Track every application from saved to offer with a visual Kanban board. Never lose track of where you are."
         />
         <FeatureCard
           icon={<ShieldCheck className="h-6 w-6" />}

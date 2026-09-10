@@ -1,15 +1,159 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Trash2, Check } from 'lucide-react'
+import { Plus, Trash2, Check, Cloud, ClipboardCheck, Share2, Database } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import type { ResumeData, Experience, Education, Project, Certification } from '@/types/resume'
 import ResumePreview from '@/components/ResumePreview'
+import AtsPanel from '@/components/reports/AtsPanel'
+import { atsCheck } from '@/services/llm'
+import { saveResume, getSessionUser } from '@/services/supabase'
+
+const apiKeysToRecord = (apiKeys: NonNullable<ReturnType<typeof useAppStore.getState>['apiKeys']>) => ({
+  provider: apiKeys.primaryProvider,
+  apiKey: apiKeys.primaryKey,
+  model: apiKeys.primaryModel,
+})
 
 export default function BuilderPage() {
+  const resume = useAppStore((s) => s.resume)
+  const apiKeys = useAppStore((s) => s.apiKeys)
+  const targetUser = useAppStore((s) => s.targetUser)
+  const evidence = useAppStore((s) => s.evidence)
+  const removeEvidence = useAppStore((s) => s.removeEvidence)
+  const addShare = useAppStore((s) => s.addShare)
+  const [cloudStatus, setCloudStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [atsLoading, setAtsLoading] = useState(false)
+  const [atsResult, setAtsResult] = useState<import('@/types/resume').AtsCheck | null>(null)
+  const [atsError, setAtsError] = useState('')
+  const [shareCopied, setShareCopied] = useState(false)
+
+  const handleSaveToCloud = useCallback(async () => {
+    const user = await getSessionUser()
+    if (!user) return
+    setCloudStatus('saving')
+    try {
+      await saveResume(resume, user.id)
+      setCloudStatus('saved')
+      setTimeout(() => setCloudStatus('idle'), 2000)
+    } catch {
+      setCloudStatus('error')
+      setTimeout(() => setCloudStatus('idle'), 2000)
+    }
+  }, [resume])
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      getSessionUser().then((u) => {
+        if (u) {
+          saveResume(resume, u.id).catch(() => {})
+        }
+      })
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [resume])
+
+  const handleAtsCheck = async () => {
+    if (!apiKeys) return
+    setAtsLoading(true)
+    setAtsError('')
+    setAtsResult(null)
+    try {
+      const result = await atsCheck(resume, null, apiKeysToRecord(apiKeys), targetUser ?? undefined)
+      setAtsResult(result.check)
+    } catch (e) {
+      setAtsError(e instanceof Error ? e.message : 'ATS check failed')
+    } finally {
+      setAtsLoading(false)
+    }
+  }
+
+  const handleShare = () => {
+    const slug = Math.random().toString(36).slice(2, 10)
+    addShare({
+      slug,
+      name: resume.contact.fullName || 'Resume',
+      resume,
+      atsScore: atsResult?.overall_score ?? null,
+    })
+    const url = `${window.location.origin}/share/${slug}`
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2000)
+    }).catch(() => {})
+  }
+
   return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      <ResumeForm />
-      <PreviewPanel />
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
+        <h1 className="text-base font-semibold text-slate-900">Resume Builder</h1>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleAtsCheck}
+            disabled={!apiKeys || atsLoading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            {atsLoading ? 'Checking...' : 'Run ATS check'}
+          </button>
+          <button
+            onClick={handleShare}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            {shareCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+            {shareCopied ? 'Copied!' : 'Share resume'}
+          </button>
+          <button
+            onClick={handleSaveToCloud}
+            disabled={cloudStatus === 'saving'}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+          >
+            <Cloud className="h-4 w-4" />
+            {cloudStatus === 'saving' ? 'Saving...' : 'Save to cloud'}
+          </button>
+          {cloudStatus === 'saved' && <span className="text-sm text-green-600">Saved</span>}
+          {cloudStatus === 'error' && <span className="text-sm text-red-600">Error saving</span>}
+        </div>
+      </div>
+
+      {atsError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{atsError}</div>
+      )}
+
+      {atsResult && <AtsPanel check={atsResult} />}
+
+      {evidence.length > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <Database className="h-5 w-5 text-slate-600" />
+            <h2 className="text-base font-semibold text-slate-900">Evidence vault</h2>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+              {evidence.length} item{evidence.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {evidence.map((item) => (
+              <div key={item.id} className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                  item.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
+                  item.confidence === 'medium' ? 'bg-blue-100 text-blue-700' :
+                  'bg-amber-100 text-amber-700'
+                }`}>
+                  {item.category}
+                </span>
+                <span className="min-w-0 flex-1 text-slate-700">{item.text}</span>
+                <button onClick={() => removeEvidence(item.id)} className="shrink-0 text-slate-400 hover:text-red-600">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="grid gap-8 lg:grid-cols-2">
+        <ResumeForm />
+        <PreviewPanel />
+      </div>
     </div>
   )
 }

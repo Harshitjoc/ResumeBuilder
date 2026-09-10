@@ -1,10 +1,14 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { FileText, Briefcase, ListChecks, Eye, Home } from 'lucide-react'
+import { FileText, Briefcase, ListChecks, Eye, Home, History, LayoutGrid } from 'lucide-react'
+import AuthWidget from '@/components/AuthWidget'
+import { PersonaPicker } from '@/components/PersonaPicker'
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/builder', label: 'Resume Builder', icon: FileText },
   { to: '/jobs', label: 'Job Analysis', icon: Briefcase },
+  { to: '/applications', label: 'Applications', icon: LayoutGrid },
+  { to: '/history', label: 'History & Reports', icon: History },
   { to: '/verify', label: 'Verification Queue', icon: ListChecks },
   { to: '/preview', label: 'Preview', icon: Eye },
 ]
@@ -32,6 +36,10 @@ export default function Layout() {
               {label}
             </NavLink>
           ))}
+          <div className="ml-auto flex items-center gap-2">
+            <PersonaPicker compact />
+            <AuthWidget />
+          </div>
         </nav>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-8">

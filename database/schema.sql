@@ -9,12 +9,16 @@ create table if not exists public.profiles (
     id uuid primary key references auth.users(id) on delete cascade,
     full_name text,
     experience_level text check (experience_level in ('entry','mid','senior','lead')),
+    target_user text check (target_user in ('recent-grad','working-professional','career-switcher')),
     primary_role text,
     tech_stack jsonb default '[]'::jsonb,
     target_companies jsonb default '[]'::jsonb,
     created_at timestamptz default now(),
     updated_at timestamptz default now()
 );
+
+alter table public.profiles add column if not exists target_user text
+    check (target_user in ('recent-grad','working-professional','career-switcher'));
 
 -- Master resumes (base copies)
 create table if not exists public.resumes (
@@ -129,3 +133,67 @@ create policy "users update own queue" on public.verification_queue for update u
 create policy "users select own applications" on public.applications for select using (auth.uid() = user_id);
 create policy "users insert own applications" on public.applications for insert with check (auth.uid() = user_id);
 create policy "users update own applications" on public.applications for update using (auth.uid() = user_id);
+
+-- Analysis / report history (resume analyses, job-fit analyses, verification decisions, resume snapshots)
+create table if not exists public.analysis_reports (
+    id uuid primary key default uuid_generate_v4(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    kind text not null check (kind in ('resume-analysis','job-analysis','verification','resume-snapshot')),
+    title text not null,
+    score int,
+    payload jsonb,
+    resume_snapshot jsonb,
+    job_snapshot jsonb,
+    created_at timestamptz default now()
+);
+
+create index if not exists idx_analysis_reports_user_id on public.analysis_reports (user_id);
+
+alter table public.analysis_reports enable row level security;
+
+create policy "users select own reports" on public.analysis_reports for select using (auth.uid() = user_id);
+create policy "users insert own reports" on public.analysis_reports for insert with check (auth.uid() = user_id);
+create policy "users delete own reports" on public.analysis_reports for delete using (auth.uid() = user_id);
+
+-- Evidence / claims vault: user-confirmed facts reused across resume versions
+create table if not exists public.evidence (
+    id uuid primary key default uuid_generate_v4(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    category text not null check (category in ('skill','achievement','metric','project','education','certification')),
+    text text not null,
+    confidence text not null default 'medium' check (confidence in ('high','medium','low')),
+    source text not null default 'user' check (source in ('document','user','ai-suggestion')),
+    created_at timestamptz default now()
+);
+
+create index if not exists idx_evidence_user_id on public.evidence (user_id);
+
+alter table public.evidence enable row level security;
+
+create policy "users select own evidence" on public.evidence for select using (auth.uid() = user_id);
+create policy "users insert own evidence" on public.evidence for insert with check (auth.uid() = user_id);
+create policy "users delete own evidence" on public.evidence for delete using (auth.uid() = user_id);
+
+-- Shareable resume links + public score badges (monetization / PLG)
+create table if not exists public.shares (
+    id uuid primary key default uuid_generate_v4(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    slug text unique not null,
+    name text not null,
+    resume_snapshot jsonb not null,
+    ats_score int check (ats_score between 0 and 100),
+    created_at timestamptz default now()
+);
+
+create index if not exists idx_shares_user_id on public.shares (user_id);
+create index if not exists idx_shares_slug on public.shares (slug);
+
+-- Public reads on the row matching a share slug are allowed; writes are owner-only.
+alter table public.shares enable row level security;
+
+create policy "anyone can view a share by slug" on public.shares for select using (
+    (select true)
+);
+create policy "users insert own shares" on public.shares for insert with check (auth.uid() = user_id);
+create policy "users update own shares" on public.shares for update using (auth.uid() = user_id);
+create policy "users delete own shares" on public.shares for delete using (auth.uid() = user_id);

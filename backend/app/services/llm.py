@@ -30,6 +30,22 @@ class LLMService:
         if mapped is None:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
+        if mapped == LLMProvider.OLLAMA:
+            # The api_key field carries the Ollama base URL. Normalize it so we
+            # always hit the native host Ollama: on Windows, "localhost" can
+            # resolve to a Docker Desktop / WSL relay bound to ::1 that serves a
+            # *different* model set, causing "model not found" errors.
+            base = (self.api_key or "http://127.0.0.1:11434").strip().rstrip("/")
+            base = base.replace("://localhost:", "://127.0.0.1:").replace("://localhost/", "://127.0.0.1/")
+            if not base.startswith(("http://", "https://")):
+                base = "http://" + base
+            return LLM.create(
+                provider=mapped,
+                model_name=self.model or "llama3",
+                api_key=base,
+                temperature=0.4,
+            )
+
         return LLM.create(
             provider=mapped,
             model_name=self.model,

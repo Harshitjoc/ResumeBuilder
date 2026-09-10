@@ -21,3 +21,6 @@ Thumbs.db
 
 # Agent skills library (not part of the project)
 .agents/
+# Runtime data
+backend/data/
+skills-lock.json
