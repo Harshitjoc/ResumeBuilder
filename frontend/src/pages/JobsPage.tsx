@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Sparkles, Cloud, FileText, Target, ClipboardCheck, LayoutGrid, Copy, Download } from 'lucide-react'
+import { Loader2, Sparkles, Cloud, FileText, Target, ClipboardCheck, LayoutGrid, Copy, Download, RefreshCw } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import ApiKeyManager from '@/components/ApiKeyManager'
 import JobAnalysisCard from '@/components/reports/JobAnalysisCard'
 import AtsPanel from '@/components/reports/AtsPanel'
-import { parseJobDescription, analyzeCompatibility, customizeResume, generateCoverLetter, generateInterviewPrep, atsCheck } from '@/services/llm'
+import Gate, { QuotaNotice } from '@/components/Gate'
+import { parseJobDescription, analyzeCompatibility, customizeResume, generateCoverLetter, generateInterviewPrep, atsCheck, submitJob, getJob } from '@/services/llm'
 import type { JobAnalysis, VerificationChange, AtsCheck, InterviewPrep } from '@/types/resume'
 import { saveJobPosting, saveAnalysisReport, getSessionUser } from '@/services/supabase'
 
@@ -43,6 +44,8 @@ export default function JobsPage() {
 
   const [atsResult, setAtsResult] = useState<AtsCheck | null>(null)
   const [atsLoading, setAtsLoading] = useState(false)
+
+  const [customizeJob, setCustomizeJob] = useState<{ id: string; status: string } | null>(null)
 
   const hasKeys = Boolean(apiKeys?.primaryKey)
 
@@ -101,38 +104,86 @@ export default function JobsPage() {
     setLoading('customize')
     try {
       const result = await customizeResume(resume, parsedJob, analysis, apiKeysToRecord(apiKeys), targetUser ?? undefined)
-      const changes: VerificationChange[] = (result.customizations ?? []).map(
-        (c: Record<string, unknown>, i: number) => ({
-          id: `c${i}`,
-          section: c.section as string,
-          changeType: c.change_type as string,
-          original: (c.original as string) ?? '',
-          customized: (c.customized as string) ?? '',
-          reason: (c.reason as string) ?? '',
-          severity: (c.change_severity as 'low' | 'medium' | 'high') ?? 'low',
-          action: 'pending' as const,
-          confidence: (c.confidence as 'high' | 'medium' | 'low' | undefined) ?? undefined,
-          isAuthentic: (c.is_authentic as boolean | undefined) ?? undefined,
-        }),
-      )
-      if (changes.length === 0) {
-        changes.push({
-          id: 'summary',
-          section: 'customization',
-          changeType: 'ready',
-          original: '',
-          customized: result.customization_summary ?? 'Resume is ready for the job with no required changes.',
-          reason: '',
-          severity: 'low',
-          action: 'pending',
-        })
-      }
-      setPendingChanges(changes)
-      navigate('/verify')
+      applyCustomizationResult(result)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Customization failed')
     } finally {
       setLoading(null)
+    }
+  }
+
+  const applyCustomizationResult = (result: {
+    customizations?: Array<Record<string, unknown>>
+    customization_summary?: string
+  }) => {
+    const changes: VerificationChange[] = (result.customizations ?? []).map(
+      (c: Record<string, unknown>, i: number) => ({
+        id: `c${i}`,
+        section: c.section as string,
+        changeType: c.change_type as string,
+        original: (c.original as string) ?? '',
+        customized: (c.customized as string) ?? '',
+        reason: (c.reason as string) ?? '',
+        severity: (c.change_severity as 'low' | 'medium' | 'high') ?? 'low',
+        action: 'pending' as const,
+        confidence: (c.confidence as 'high' | 'medium' | 'low' | undefined) ?? undefined,
+        isAuthentic: (c.is_authentic as boolean | undefined) ?? undefined,
+      }),
+    )
+    if (changes.length === 0) {
+      changes.push({
+        id: 'summary',
+        section: 'customization',
+        changeType: 'ready',
+        original: '',
+        customized: result.customization_summary ?? 'Resume is ready for the job with no required changes.',
+        reason: '',
+        severity: 'low',
+        action: 'pending',
+      })
+    }
+    setPendingChanges(changes)
+    navigate('/verify')
+  }
+
+  const pollJob = (jobId: string) => {
+    getJob(jobId)
+      .then((job) => {
+        if (job.status === 'done') {
+          setCustomizeJob(null)
+          const result = (job.result ?? {}) as {
+            customizations?: Array<Record<string, unknown>>
+            customization_summary?: string
+          }
+          applyCustomizationResult(result)
+        } else if (job.status === 'error') {
+          setCustomizeJob(null)
+          setError(job.error ?? 'Background customization failed')
+        } else {
+          setCustomizeJob({ id: jobId, status: job.status })
+          setTimeout(() => pollJob(jobId), 2000)
+        }
+      })
+      .catch((e) => {
+        setCustomizeJob(null)
+        setError(e instanceof Error ? e.message : 'Background job failed')
+      })
+  }
+
+  const handleCustomizeBackground = async () => {
+    if (!apiKeys || !analysis || !parsedJob) return
+    setError('')
+    try {
+      const { jobId } = await submitJob(
+        'customize',
+        { resume, job: parsedJob, compatibility: analysis },
+        apiKeysToRecord(apiKeys),
+        targetUser ?? undefined,
+      )
+      setCustomizeJob({ id: jobId, status: 'queued' })
+      pollJob(jobId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start background job')
     }
   }
 
@@ -241,6 +292,8 @@ export default function JobsPage() {
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
       )}
 
+      <QuotaNotice />
+
       {analysis && (
         <>
           <JobAnalysisCard analysis={analysis} />
@@ -257,37 +310,62 @@ export default function JobsPage() {
               )}
               Customize resume for this job
             </button>
-            <button
-              onClick={handleCoverLetter}
-              disabled={coverLoading || !parsedJob}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {coverLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              Generate cover letter
-            </button>
-            <button
-              onClick={handleInterviewPrep}
-              disabled={prepLoading || !parsedJob}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {prepLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
-              Interview prep
-            </button>
-            <button
-              onClick={handleAtsCheck}
-              disabled={atsLoading || !parsedJob}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {atsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
-              Run ATS check
-            </button>
-            <button
-              onClick={handleTrackApplication}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <LayoutGrid className="h-4 w-4" />
-              Track application
-            </button>
+            {customizeJob ? (
+              <span className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                {customizeJob.status === 'running' ? 'Customizing in background...' : 'Job queued...'}
+              </span>
+            ) : (
+              <Gate inline reason="Background jobs are a Pro feature.">
+                <button
+                  onClick={handleCustomizeBackground}
+                  disabled={loading !== null}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Customize in background
+                </button>
+              </Gate>
+            )}
+            <Gate inline reason="Cover letters are a Pro feature.">
+              <button
+                onClick={handleCoverLetter}
+                disabled={coverLoading || !parsedJob}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {coverLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                Generate cover letter
+              </button>
+            </Gate>
+            <Gate inline reason="Interview prep is a Pro feature.">
+              <button
+                onClick={handleInterviewPrep}
+                disabled={prepLoading || !parsedJob}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {prepLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+                Interview prep
+              </button>
+            </Gate>
+            <Gate inline reason="ATS checks are a Pro feature.">
+              <button
+                onClick={handleAtsCheck}
+                disabled={atsLoading || !parsedJob}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {atsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
+                Run ATS check
+              </button>
+            </Gate>
+            <Gate inline reason="The application tracker is a Pro feature.">
+              <button
+                onClick={handleTrackApplication}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <LayoutGrid className="h-4 w-4" />
+                Track application
+              </button>
+            </Gate>
             <button
               onClick={handleSaveToCloud}
               disabled={cloudStatus === 'saving'}

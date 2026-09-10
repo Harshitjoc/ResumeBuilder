@@ -2,7 +2,7 @@
 
 ## Status
 
-"Next-level" iteration built and green. Frontend and backend compile; all flows wrapped end-to-end: resume builder, import + analysis, job analysis, verification queue, History & Reports, PDF export, **persona-aware AI (recent-grad / working-professional / career-switcher)**, **triple-layer ATS check**, **cover letters + interview prep**, **application tracker (Kanban + funnel stats)**, **shareable resume links with score badge**, and **Evidence Vault (user-confirmed claims)**. Backend gains `extract.py` (deterministic contact/evidence extraction + confidence) and 3 new LLM endpoints with lenient output coercion. Extension now auto-fills LinkedIn, Indeed, **Workday, Greenhouse, and Lever** with tagged multi-resume storage. Frontend build + 21 backend tests pass. Supabase schema (incl. `evidence` + `shares` + persona column) written but not deployed.
+"Next-level" iteration built and green. Frontend and backend compile; all flows wrapped end-to-end: resume builder, import + analysis, job analysis, verification queue, History & Reports, PDF export, **persona-aware AI (recent-grad / working-professional / career-switcher)**, **triple-layer ATS check**, **cover letters + interview prep**, **application tracker**, **shareable resume links with score badge**, **Evidence Vault (user-confirmed claims)**, and a **Free/Pro tier with gateway-free UPI payments (manual UTR approval), server-side daily quota, hosted shares, file-level ATS and async background jobs**. Backend gains `extract.py`, 3 new LLM endpoints, and payment/shares/ats/jobs/me routers. Extension auto-fills LinkedIn, Indeed, Workday, Greenhouse, and Lever with tagged multi-resume storage. Frontend build + 42 backend tests pass. Supabase schema (incl. `evidence`, `shares`, `profiles.plan`, `plan_requests`, `usage_logs`) written but not deployed.
 
 ## What This Is
 
@@ -49,6 +49,18 @@ resume-builder/
 Supabase persistence: `frontend/src/services/supabase.ts` (typed client + helpers) and `frontend/src/components/AuthWidget.tsx` (sign in/up/out in Layout header). When `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are absent every helper no-ops and the app is browser-local only. Backend `SUPABASE_URL`/`SUPABASE_SERVICE_KEY`/`CORS_ORIGINS` in `backend/.env`. Deploy: `frontend/vercel.json` (SPA rewrite), `backend/railway.json` (Nixpacks + `uvicorn ... --port $PORT`).
 
 Backend routes: `/api/health`, `POST /api/llm/generate-summary {resume, apiKeys}`, `/api/llm/parse-job {jobText, apiKeys}`, `/api/llm/analyze-compatibility {resume, job, apiKeys}`, `/api/llm/customize-resume {resume, job, compatibility, apiKeys}`, `/api/llm/parse-resume {resumeText, apiKeys}` (→ `{parsed, evidence[], contactConfidence{}}`), `/api/llm/analyze-resume {resume, apiKeys}`, `/api/llm/ats-check {resume, job?, apiKeys}` (→ `{check: {overall_score, keyword_notes, structure_notes, formatting_notes, missing_headers, parseability_notes, contact_present, action_items}}`), `/api/llm/generate-cover-letter {resume, job, apiKeys}` (→ `{letter}`), `/api/llm/generate-interview-prep {resume, job, apiKeys}` (→ `{prep: {likely_questions, company_research, talking_points, questions_to_ask}}`). All accept optional `targetUser`. `apiKeys` = `{provider, apiKey?, model?}`. `customize-resume` changes each carry `confidence` + `is_authentic` (coerced server-side).
+
+## Free/Pro Gating + Manual UPI Payments
+
+The platform monetizes via a Free/Pro tier without any third-party payment gateway:
+- **Free** keeps: builder, import/parse/verify, persona, extension autofill, resume analysis + job-fit score, 25 LLM calls/day (`FREE_DAILY_LLM`).
+- **Pro** (locked, one-time payment → 12 months via `SUBSCRIPTION_MONTHS`): ATS check incl. file upload (`/api/ats/file`), cover letters, interview prep, application tracker, hosted share links + score badge (`/api/shares/{slug}/badge.svg`), async background jobs (`/api/jobs`), unlimited quota.
+- **Identity**: frontend sends `X-Client-Key` (anonymous browser token, localStorage `rb-client-key`) on every API call, plus `X-User-Id` when signed in. Backend entitlements live in `backend/data/*.json` (plan + usage) when Supabase env vars are absent; profile/plan_requests/usage_logs tables are used when configured.
+- **Payments** (`/api/payments`): `GET /meta` exposed UPI details; `POST /request {utr, email?, name?}` stores a pending request (409 on duplicate UTR); admin approves via `POST /requests/{id}/approve` with `Authorization: Bearer $ADMIN_TOKEN` (default `admin-dev`) → sets plan + expiry.
+- **Quota**: every `/api/llm/*` POST counts when an `X-Client-Key` header is present and `ENABLE_ENTITLEMENTS != 'false'`; free users over 25/day get 429 `{"detail":{"detail":"Free tier daily limit reached"...}}`. No header → no metering (keeps tests simple).
+- **Frontend pages**: `/upgrade` (UPI QR + UTR form + "my requests" status; QR rendered client-side with `qrcode`), `/admin` (admin-token approvals), `Gate` component (`frontend/src/components/Gate.tsx`) wraps Pro features with a paywall card or inline lock; `services/plan.ts:refreshPlan()` syncs plan/quota into the Zustand store from `/api/me`.
+- **Env**: `ADMIN_TOKEN`, `PLAN_MODE=manual`, `UPI_ID`, `UPI_PAYEE_NAME`, `UPI_PAYMENT_AMOUNT` (499), `UPI_CURRENCY=INR`, `SUBSCRIPTION_MONTHS=12`, `ENABLE_ENTITLEMENTS=true`, `FREE_DAILY_LLM=25`.
+- The Chrome extension deep-links into the tracker via `/applications?url=...&title=...`; the tracker page reads those query params on mount.
 
 ## Critical Design Constraint
 

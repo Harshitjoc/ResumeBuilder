@@ -1,13 +1,37 @@
-import { useParams } from 'react-router-dom'
-import { Link } from 'react-router-dom'
-import { FileWarning } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useParams, Link } from 'react-router-dom'
+import { FileWarning, ShieldCheck } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import ResumePreview from '@/components/ResumePreview'
+import { fetchShare } from '@/services/llm'
+import type { PublicShareData } from '@/services/llm'
 
 export default function SharePage() {
   const { slug } = useParams<{ slug: string }>()
   const shares = useAppStore((s) => s.shares)
-  const share = shares.find((s) => s.slug === slug)
+  const localShare = shares.find((s) => s.slug === slug)
+
+  const [remote, setRemote] = useState<PublicShareData | null>(null)
+  const [notFound, setNotFound] = useState(false)
+
+  useEffect(() => {
+    if (localShare || notFound) return
+    let cancelled = false
+    fetchShare(slug ?? '')
+      .then((data) => {
+        if (!cancelled) setRemote(data)
+      })
+      .catch(() => {
+        if (!cancelled) setNotFound(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slug, localShare, notFound])
+
+  const share = localShare
+    ? { name: localShare.name, createdAt: localShare.createdAt, atsScore: localShare.atsScore, resume: localShare.resume }
+    : remote
 
   if (!share) {
     return (
@@ -55,6 +79,11 @@ export default function SharePage() {
       <div className="mx-auto max-w-[800px] rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
         <ResumePreview resume={share.resume} />
       </div>
+
+      <p className="flex items-center justify-center gap-1.5 text-center text-xs text-slate-400">
+        <ShieldCheck className="h-3.5 w-3.5" />
+        Powered by ResumeBuilder — built with verified, authentic claims
+      </p>
     </div>
   )
 }

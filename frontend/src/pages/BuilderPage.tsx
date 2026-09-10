@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Trash2, Check, Cloud, ClipboardCheck, Share2, Database } from 'lucide-react'
+import { Plus, Trash2, Check, Cloud, ClipboardCheck, Share2, Database, Loader2 } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import type { ResumeData, Experience, Education, Project, Certification } from '@/types/resume'
 import ResumePreview from '@/components/ResumePreview'
 import AtsPanel from '@/components/reports/AtsPanel'
-import { atsCheck } from '@/services/llm'
+import Gate, { QuotaNotice } from '@/components/Gate'
+import { atsCheck, createShare } from '@/services/llm'
 import { saveResume, getSessionUser } from '@/services/supabase'
 
 const apiKeysToRecord = (apiKeys: NonNullable<ReturnType<typeof useAppStore.getState>['apiKeys']>) => ({
@@ -26,6 +27,8 @@ export default function BuilderPage() {
   const [atsResult, setAtsResult] = useState<import('@/types/resume').AtsCheck | null>(null)
   const [atsError, setAtsError] = useState('')
   const [shareCopied, setShareCopied] = useState(false)
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareError, setShareError] = useState('')
 
   const handleSaveToCloud = useCallback(async () => {
     const user = await getSessionUser()
@@ -67,19 +70,30 @@ export default function BuilderPage() {
     }
   }
 
-  const handleShare = () => {
-    const slug = Math.random().toString(36).slice(2, 10)
-    addShare({
-      slug,
-      name: resume.contact.fullName || 'Resume',
-      resume,
-      atsScore: atsResult?.overall_score ?? null,
-    })
-    const url = `${window.location.origin}/share/${slug}`
-    navigator.clipboard.writeText(url).then(() => {
+  const handleShare = async () => {
+    setShareLoading(true)
+    setShareError('')
+    try {
+      const created = await createShare({
+        name: resume.contact.fullName || 'Resume',
+        atsScore: atsResult?.overall_score ?? null,
+        resume,
+      })
+      addShare({
+        slug: created.slug,
+        name: created.name,
+        resume,
+        atsScore: created.atsScore,
+      })
+      const url = `${window.location.origin}/share/${created.slug}`
+      await navigator.clipboard.writeText(url)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2000)
-    }).catch(() => {})
+    } catch (e) {
+      setShareError(e instanceof Error ? e.message : 'Could not create share link')
+    } finally {
+      setShareLoading(false)
+    }
   }
 
   return (
@@ -87,21 +101,26 @@ export default function BuilderPage() {
       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
         <h1 className="text-base font-semibold text-slate-900">Resume Builder</h1>
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleAtsCheck}
-            disabled={!apiKeys || atsLoading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            <ClipboardCheck className="h-4 w-4" />
-            {atsLoading ? 'Checking...' : 'Run ATS check'}
-          </button>
-          <button
-            onClick={handleShare}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            {shareCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
-            {shareCopied ? 'Copied!' : 'Share resume'}
-          </button>
+          <Gate inline reason="ATS checks are a Pro feature.">
+            <button
+              onClick={handleAtsCheck}
+              disabled={!apiKeys || atsLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <ClipboardCheck className="h-4 w-4" />
+              {atsLoading ? 'Checking...' : 'Run ATS check'}
+            </button>
+          </Gate>
+          <Gate inline reason="Hosted share links are a Pro feature.">
+            <button
+              onClick={handleShare}
+              disabled={shareLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              {shareLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : shareCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+              {shareLoading ? 'Creating...' : shareCopied ? 'Copied!' : 'Share resume'}
+            </button>
+          </Gate>
           <button
             onClick={handleSaveToCloud}
             disabled={cloudStatus === 'saving'}
@@ -118,6 +137,12 @@ export default function BuilderPage() {
       {atsError && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{atsError}</div>
       )}
+
+      {shareError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{shareError}</div>
+      )}
+
+      <QuotaNotice />
 
       {atsResult && <AtsPanel check={atsResult} />}
 

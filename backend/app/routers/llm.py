@@ -1,8 +1,10 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
+from app import config
+from app.services.entitlements import check_and_increment
 from app.services.extract import (
     build_contact_confidence,
     build_evidence,
@@ -22,9 +24,31 @@ from app.services.prompts import (
     sanitize_target_user,
 )
 
-router = APIRouter(prefix="/api/llm", tags=["llm"])
 
-VALID_PERSONAS = ("recent-grad", "working-professional", "career-switcher")
+async def _check_quota(
+    x_client_key: str | None = Header(None),
+):
+    if not x_client_key:
+        return
+    if config.ENABLE_ENTITLEMENTS == "false":
+        return
+    result = check_and_increment(x_client_key)
+    if not result["allowed"]:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "detail": "Free tier daily limit reached",
+                "limit": result["limit"],
+                "remaining": 0,
+            },
+        )
+
+
+router = APIRouter(
+    prefix="/api/llm",
+    tags=["llm"],
+    dependencies=[Depends(_check_quota)],
+)
 
 
 class ApiKeys(BaseModel):

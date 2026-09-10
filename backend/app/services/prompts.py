@@ -318,6 +318,50 @@ overall_score is 0-100. Use empty arrays where applicable.
 """, target_user)
 
 
+def file_ats_prompt(resume_text: str, job: dict | None = None, target_user: str | None = None) -> str:
+    if job:
+        target_part = f"\nTARGET JOB (JSON):\n{_dump(job)}"
+    else:
+        target_part = "\nTARGET JOB: (none provided — assess keyword completeness and formatting broadly)"
+    return _append_persona(f"""
+You are an ATS (Applicant Tracking System) audit expert. Run a triple-layer audit
+of the candidate's raw resume text below.
+
+RAW RESUME TEXT:
+{resume_text}
+{target_part}
+
+AUTHENTICITY RULES (NON-NEGOTIABLE):
+1. Base every assessment ONLY on what is in the resume text. Do not invent facts.
+2. Note when information is missing rather than assuming it exists.
+3. Suggestions ("add a skills section", etc.) are recommendations, never
+   assertions of candidate facts.
+
+AUDIT LAYERS:
+1. KEYWORD MATCH: compare resume terms against the job's required/preferred
+   skills and responsibilities (skip detailed notes if no job is given).
+2. STRUCTURE / HEADERS: check the resume has standard sections and headers
+   (summary, experience, education, skills). List any that appear missing.
+3. FORMATTING / PARSEABILITY: assess layout, bullets, tables, columns, fonts,
+   and anything that could break ATS text extraction.
+4. CONTACT HEADER INTEGRITY: confirm name, email, phone, and links are present.
+
+Return a JSON object with EXACTLY these keys:
+{{
+  "overall_score": X,
+  "keyword_notes": ["..."],
+  "structure_notes": ["..."],
+  "formatting_notes": ["..."],
+  "missing_headers": ["..."],
+  "parseability_notes": ["..."],
+  "contact_present": true,
+  "action_items": ["..."]
+}}
+
+overall_score is 0-100. Use empty arrays where applicable.
+""", target_user)
+
+
 def cover_letter_prompt(resume: dict, job: dict, target_user: str | None = None) -> str:
     return _append_persona(f"""
 You are an expert cover letter writer. Write a 250-350 word cover letter for the

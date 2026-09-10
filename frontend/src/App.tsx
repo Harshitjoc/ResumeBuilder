@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import Layout from '@/components/Layout'
 import ErrorBoundary from '@/components/ErrorBoundary'
+import Gate from '@/components/Gate'
 import HomePage from '@/pages/HomePage'
 import BuilderPage from '@/pages/BuilderPage'
 import JobsPage from '@/pages/JobsPage'
@@ -10,6 +11,8 @@ import VerificationPage from '@/pages/VerificationPage'
 import PreviewPage from '@/pages/PreviewPage'
 import ApplicationsPage from '@/pages/ApplicationsPage'
 import SharePage from '@/pages/SharePage'
+import UpgradePage from '@/pages/UpgradePage'
+import AdminApprovalsPage from '@/pages/AdminApprovalsPage'
 
 export default function App() {
   return (
@@ -23,8 +26,17 @@ export default function App() {
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/verify" element={<VerificationPage />} />
           <Route path="/preview" element={<PreviewPage />} />
-          <Route path="/applications" element={<ApplicationsPage />} />
+          <Route
+            path="/applications"
+            element={
+              <Gate reason="The application tracker is a Pro feature.">
+                <ApplicationsPage />
+              </Gate>
+            }
+          />
           <Route path="/share/:slug" element={<SharePage />} />
+          <Route path="/upgrade" element={<UpgradePage />} />
+          <Route path="/admin" element={<AdminApprovalsPage />} />
         </Route>
       </Routes>
     </ErrorBoundary>

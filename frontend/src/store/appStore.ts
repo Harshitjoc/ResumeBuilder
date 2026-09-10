@@ -21,6 +21,14 @@ interface ApiKeys {
   secondaryModel?: string
 }
 
+export interface PlanInfo {
+  tier: 'free' | 'pro'
+  expiresAt: string | null
+  quotaRemaining: number | null
+  quotaLimit: number | null
+  quotaExceeded: boolean
+}
+
 interface AppState {
   resume: ResumeData
   apiKeys: ApiKeys | null
@@ -32,6 +40,7 @@ interface AppState {
   evidence: EvidenceItem[]
   applications: ApplicationRecord[]
   shares: ShareRecord[]
+  plan: PlanInfo
   setResume: (resume: ResumeData) => void
   updateContact: (contact: Partial<ResumeData['contact']>) => void
   updateSummary: (summary: string) => void
@@ -56,6 +65,9 @@ interface AppState {
   setApplications: (applications: ApplicationRecord[]) => void
   addShare: (data: Omit<ShareRecord, 'id' | 'createdAt'>) => void
   removeShare: (id: string) => void
+  setPlan: (plan: Partial<PlanInfo>) => void
+  decrementQuota: () => void
+  setQuotaExceeded: (exceeded: boolean) => void
 }
 
 function uid() {
@@ -75,6 +87,13 @@ export const useAppStore = create<AppState>()(
       evidence: [],
       applications: [],
       shares: [],
+      plan: {
+        tier: 'free',
+        expiresAt: null,
+        quotaRemaining: null,
+        quotaLimit: null,
+        quotaExceeded: false,
+      },
 
       setResume: (resume) => set({ resume }),
       updateContact: (contact) =>
@@ -155,6 +174,18 @@ export const useAppStore = create<AppState>()(
         })),
       removeShare: (id) =>
         set((state) => ({ shares: state.shares.filter((s) => s.id !== id) })),
+      setPlan: (plan) => set((state) => ({ plan: { ...state.plan, ...plan } })),
+      decrementQuota: () =>
+        set((state) => ({
+          plan: {
+            ...state.plan,
+            quotaRemaining:
+              state.plan.quotaRemaining === null
+                ? null
+                : Math.max(0, state.plan.quotaRemaining - 1),
+          },
+        })),
+      setQuotaExceeded: (quotaExceeded) => set((state) => ({ plan: { ...state.plan, quotaExceeded } })),
     }),
     {
       name: 'resume-builder-storage',

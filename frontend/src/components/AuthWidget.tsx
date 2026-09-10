@@ -8,6 +8,7 @@ import {
   signUp,
   signOut,
 } from '@/services/supabase'
+import { setUserId } from '@/services/clientKey'
 import type { AppUser } from '@/services/supabase'
 
 export default function AuthWidget() {
@@ -21,6 +22,7 @@ export default function AuthWidget() {
   const refreshUser = useCallback(async () => {
     const u = await getSessionUser()
     setUser(u)
+    setUserId(u?.id ?? null)
   }, [])
 
   useEffect(() => {
@@ -31,7 +33,9 @@ export default function AuthWidget() {
     refreshUser().finally(() => setLoading(false))
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        setUser((session?.user as AppUser) ?? null)
+        const u = (session?.user as AppUser) ?? null
+        setUser(u)
+        setUserId(u?.id ?? null)
       },
     )
     return () => subscription.unsubscribe()

@@ -20,6 +20,11 @@ create table if not exists public.profiles (
 alter table public.profiles add column if not exists target_user text
     check (target_user in ('recent-grad','working-professional','career-switcher'));
 
+-- Paid plan entitlement (manual UPI-UTR approval flow; automatic PSP later)
+alter table public.profiles add column if not exists plan text not null default 'free'
+    check (plan in ('free','pro'));
+alter table public.profiles add column if not exists plan_expires_at timestamptz;
+
 -- Master resumes (base copies)
 create table if not exists public.resumes (
     id uuid primary key default uuid_generate_v4(),
@@ -197,3 +202,40 @@ create policy "anyone can view a share by slug" on public.shares for select usin
 create policy "users insert own shares" on public.shares for insert with check (auth.uid() = user_id);
 create policy "users update own shares" on public.shares for update using (auth.uid() = user_id);
 create policy "users delete own shares" on public.shares for delete using (auth.uid() = user_id);
+
+-- Plan upgrade requests (manual UPI QR payment -> user enters UTR -> admin approves)
+create table if not exists public.plan_requests (
+    id uuid primary key default uuid_generate_v4(),
+    user_id uuid references auth.users(id) on delete set null,
+    client_key text not null,
+    name text,
+    email text,
+    utr text not null unique,
+    amount numeric,
+    status text not null default 'pending' check (status in ('pending','approved','rejected')),
+    created_at timestamptz default now(),
+    decided_at timestamptz,
+    decided_by text
+);
+
+create index if not exists idx_plan_requests_client_key on public.plan_requests (client_key);
+
+alter table public.plan_requests enable row level security;
+
+create policy "users select own plan requests" on public.plan_requests for select using (auth.uid() = user_id);
+create policy "users insert own plan requests" on public.plan_requests for insert with check (auth.uid() = user_id);
+
+-- Daily LLM proxy usage counters for free-tier metering
+create table if not exists public.usage_logs (
+    id bigserial primary key,
+    identity_key text not null,
+    day date not null default current_date,
+    calls int not null default 0,
+    updated_at timestamptz default now(),
+    unique (identity_key, day)
+);
+
+alter table public.usage_logs enable row level security;
+create policy "no direct client access to usage logs" on public.usage_logs for select using (false);
+create policy "no direct client writes to usage logs" on public.usage_logs for insert with check (false);
+create policy "no direct client updates to usage logs" on public.usage_logs for update using (false);

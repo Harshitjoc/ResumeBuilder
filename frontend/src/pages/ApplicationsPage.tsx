@@ -33,10 +33,13 @@ export default function ApplicationsPage() {
   const updateApplicationStatus = useAppStore((s) => s.updateApplicationStatus)
   const removeApplication = useAppStore((s) => s.removeApplication)
 
-  const [showForm, setShowForm] = useState(false)
-  const [newTitle, setNewTitle] = useState('')
-  const [newCompany, setNewCompany] = useState('')
-  const [newUrl, setNewUrl] = useState('')
+  const [showForm, setShowForm] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return Boolean(params.get('title') || params.get('url'))
+  })
+  const [newTitle, setNewTitle] = useState(() => new URLSearchParams(window.location.search).get('title') ?? '')
+  const [newCompany, setNewCompany] = useState(() => new URLSearchParams(window.location.search).get('company') ?? '')
+  const [newUrl, setNewUrl] = useState(() => new URLSearchParams(window.location.search).get('url') ?? '')
 
   const total = applications.length
   const interviewCount = applications.filter((a) => a.status === 'interview' || a.status === 'offer').length

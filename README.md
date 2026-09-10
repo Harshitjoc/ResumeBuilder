@@ -85,7 +85,15 @@ The app runs browser-local by default (Zustand persist + localStorage), so Histo
    - job postings and verification actions are recorded,
    - every analysis/verification report is mirrored to `analysis_reports` and visible on the History page from any device.
 
-RLS means writes/reads require a signed-in user; without the env vars (or while signed out) every helper no-ops and the app is fully browser-local. The schema also includes a `target_user` persona column on `profiles`, an `evidence` claims vault, and a `shares` table (public read by slug for share links + score badges).
+RLS means writes/reads require a signed-in user; without the env vars (or while signed out) every helper no-ops and the app is fully browser-local. The schema also includes a `target_user` persona column on `profiles`, an `evidence` claims vault, `shares` (public read by slug for share links + score badges), `plan_requests` and `usage_logs` (Free/Pro metering).
+
+## Pro tier & payments (gateway-free UPI)
+
+The app ships with a Free/Pro tier — **no third-party payment gateway needed**, works in India via UPI:
+
+- **Free** keeps the builder, import/parse/verify, persona, extension autofill, resume analysis + job-fit score, and 25 LLM calls/day.
+- **Pro** (one-time UPI payment → 12 months) unlocks ATS checks (incl. file upload), cover letters, interview prep, the application tracker, hosted share links + score badge, async background jobs, and unlimited daily processing.
+- Users pay by scanning the UPI QR on `/upgrade`, then submit their UTR number. Approve from `/admin` (bearer token = `ADMIN_TOKEN`, default `admin-dev`). Set `UPI_ID`/`UPI_PAYEE_NAME`/`UPI_PAYMENT_AMOUNT` in `backend/.env`. Quota enforcement lives in `backend/app/services/entitlements.py` and mirrors to `usage_logs` when Supabase env vars are present.
 
 ## Chrome extension
 
@@ -110,8 +118,10 @@ The backend ships an in-process smoke test (no server process needed). With Olla
 
 ```bash
 cd backend
+.venv\Scripts\python -m pytest tests -q     # all suites (LLM, next-level, entitlements/payments/shares/quota)
 .venv\Scripts\python tests\test_llm_routes.py     # Windows  (LLM smoke + error paths)
 .venv\Scripts\python tests\test_new_routes.py     # Windows  (ATS/cover-letter/prep + extract helpers)
+.venv\Scripts\python tests\test_entitlements.py   # Windows  (Free/Pro gating, payments, shares, quota)
 python tests/test_llm_routes.py                    # macOS/Linux
 ```
 

@@ -44,6 +44,43 @@ export async function signOut() {
 }
 
 // ---------------------------------------------------------------------------
+// Profile helpers (plan entitlement + persona)
+// ---------------------------------------------------------------------------
+
+export interface ProfileRecord {
+  plan: 'free' | 'pro'
+  planExpiresAt: string | null
+  targetUser: string | null
+}
+
+export async function getProfile(userId: string): Promise<ProfileRecord | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('plan, plan_expires_at, target_user')
+    .eq('id', userId)
+    .maybeSingle()
+  if (error || !data) return null
+  return {
+    plan: data.plan === 'pro' ? 'pro' : 'free',
+    planExpiresAt: data.plan_expires_at ? String(data.plan_expires_at) : null,
+    targetUser: data.target_user ? String(data.target_user) : null,
+  }
+}
+
+export async function upsertProfile(
+  userId: string,
+  patch: { plan?: 'free' | 'pro'; targetUser?: string | null },
+): Promise<void> {
+  if (!supabase) return
+  const row: Record<string, unknown> = { id: userId }
+  if (patch.plan) row.plan = patch.plan
+  if (patch.targetUser !== undefined) row.target_user = patch.targetUser
+  const { error } = await supabase.from('profiles').upsert(row, { onConflict: 'id' })
+  if (error) throw new Error(`Failed to update profile: ${error.message}`)
+}
+
+// ---------------------------------------------------------------------------
 // Resume helpers
 // ---------------------------------------------------------------------------
 
