@@ -1,9 +1,10 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import config
+from app.deps import AuthContext, get_user_http
 from app.services.entitlements import check_and_increment
 from app.services.extract import (
     build_contact_confidence,
@@ -26,13 +27,13 @@ from app.services.prompts import (
 
 
 async def _check_quota(
-    x_client_key: str | None = Header(None),
+    auth: AuthContext = Depends(get_user_http),
 ):
-    if not x_client_key:
+    if not auth.identity_key:
         return
     if config.ENABLE_ENTITLEMENTS == "false":
         return
-    result = check_and_increment(x_client_key)
+    result = check_and_increment(auth.identity_key, auth.user_id)
     if not result["allowed"]:
         raise HTTPException(
             status_code=429,

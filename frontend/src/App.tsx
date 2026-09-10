@@ -13,12 +13,14 @@ import ApplicationsPage from '@/pages/ApplicationsPage'
 import SharePage from '@/pages/SharePage'
 import UpgradePage from '@/pages/UpgradePage'
 import AdminApprovalsPage from '@/pages/AdminApprovalsPage'
+import LoginPage from '@/pages/LoginPage'
 
 export default function App() {
   return (
     <ErrorBoundary>
       <Routes>
         <Route element={<Layout />}>
+          <Route path="/login" element={<LoginPage />} />
           <Route index element={<HomePage />} />
           <Route path="/builder" element={<BuilderPage />} />
           <Route path="/jobs" element={<JobsPage />} />

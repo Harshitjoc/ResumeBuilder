@@ -6,6 +6,9 @@ load_dotenv()
 
 SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY: str | None = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_JWT_SECRET: str | None = os.getenv("SUPABASE_JWT_SECRET")
+ADMIN_EMAIL: str | None = os.getenv("ADMIN_EMAIL")
+TURNSTILE_SECRET_KEY: str | None = os.getenv("TURNSTILE_SECRET_KEY")
 
 CORS_ORIGINS: list[str] = [
     origin.strip()

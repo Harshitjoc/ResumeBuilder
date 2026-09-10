@@ -1,10 +1,12 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import { FileText, Briefcase, ListChecks, Eye, Home, History, LayoutGrid, Crown, ShieldCheck } from 'lucide-react'
 import AuthWidget from '@/components/AuthWidget'
 import { PersonaPicker } from '@/components/PersonaPicker'
 import { useAppStore } from '@/store/appStore'
 import { refreshPlan } from '@/services/plan'
+import { isSupabaseConfigured } from '@/services/supabase'
+import { useAuthEffects } from '@/services/useAuthEffects'
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
@@ -20,10 +22,29 @@ export default function Layout() {
   const tier = useAppStore((s) => s.plan.tier)
   const expiresAt = useAppStore((s) => s.plan.expiresAt)
   const quotaRemaining = useAppStore((s) => s.plan.quotaRemaining)
+  const sessionStatus = useAppStore((s) => s.sessionStatus)
+  const { pathname } = useLocation()
+
+  useAuthEffects()
 
   useEffect(() => {
     refreshPlan()
   }, [])
+
+  if (isSupabaseConfigured && sessionStatus === 'loading') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <span className="text-sm text-slate-400">Loading...</span>
+      </div>
+    )
+  }
+
+  const publicPaths = ['/login', '/upgrade', '/share']
+  const isPublic = publicPaths.some((p) => pathname.startsWith(p))
+
+  if (isSupabaseConfigured && sessionStatus === 'signed-out' && !isPublic) {
+    return <Navigate to="/login" replace />
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">

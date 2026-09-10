@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from app import config
+from app.deps import AuthContext, get_user_http
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -69,13 +70,13 @@ async def payment_meta():
 @router.post("/request")
 async def create_request(
     body: PaymentRequest,
-    x_client_key: str | None = Header(None),
-    x_user_id: str | None = Header(None),
+    auth: AuthContext = Depends(get_user_http),
 ):
     utr = (body.utr or "").strip()
     if not utr:
         raise HTTPException(status_code=400, detail="UTR is required")
-    client_key = x_client_key or ""
+    client_key = auth.client_key or ""
+    user_id = auth.user_id
 
     sb = _supabase_client()
     if sb:
@@ -84,7 +85,7 @@ async def create_request(
             if existing.data:
                 raise HTTPException(status_code=409, detail="UTR already submitted")
             res = sb.table("plan_requests").insert({
-                "user_id": x_user_id,
+                "user_id": user_id,
                 "client_key": client_key,
                 "name": body.name,
                 "email": body.email,
@@ -108,7 +109,7 @@ async def create_request(
         entry = {
             "id": req_id,
             "clientKey": client_key,
-            "userId": x_user_id,
+            "userId": user_id,
             "name": body.name,
             "email": body.email,
             "utr": utr,
@@ -156,10 +157,11 @@ async def list_requests(authorization: str | None = Header(None)):
 
 @router.get("/requests/mine")
 async def my_requests(
-    x_client_key: str | None = Header(None),
-    x_user_id: str | None = Header(None),
+    auth: AuthContext = Depends(get_user_http),
 ):
-    key = x_user_id or x_client_key or ""
+    user_id = auth.user_id
+    client_key = auth.client_key or ""
+    key = user_id or client_key or ""
     if not key:
         return {"requests": []}
 
@@ -171,7 +173,7 @@ async def my_requests(
             ).order("created_at", desc=True).execute()
             rows = []
             for r in res.data:
-                if r.get("user_id") == key or r.get("client_key") == key or r.get("client_key") == x_client_key:
+                if r.get("user_id") == key or r.get("client_key") == key or (client_key and r.get("client_key") == client_key):
                     rows.append({
                         "id": r["id"],
                         "clientKey": r.get("client_key", ""),
@@ -192,7 +194,7 @@ async def my_requests(
         mine = [
             p
             for p in payments
-            if p.get("clientKey") == x_client_key or (key and bool(x_user_id) and p.get("userId") == key)
+            if p.get("clientKey") == client_key or (key and bool(user_id) and p.get("userId") == key)
         ]
         mine.sort(key=lambda p: p.get("createdAt", ""), reverse=True)
     return {"requests": mine}
@@ -222,6 +224,15 @@ async def approve_request(
                 "decided_at": datetime.now(timezone.utc).isoformat(),
                 "decided_by": config.ADMIN_TOKEN,
             }).eq("id", req_id).execute()
+            from app.services import audit as audit_svc
+            audit_svc.log(
+                actor_label=f"admin:{config.ADMIN_TOKEN}",
+                action="payment.approve",
+                target_type="plan_request",
+                target_id=req_id,
+                before_data={"status": row["status"]},
+                after_data={"status": "approved", "plan": "pro", "expires_at": expires},
+            )
             return {"ok": True, "plan": "pro", "expiresAt": expires}
         except HTTPException:
             raise
@@ -270,6 +281,15 @@ async def reject_request(
                 "decided_at": datetime.now(timezone.utc).isoformat(),
                 "decided_by": config.ADMIN_TOKEN,
             }).eq("id", req_id).execute()
+            from app.services import audit as audit_svc
+            audit_svc.log(
+                actor_label=f"admin:{config.ADMIN_TOKEN}",
+                action="payment.reject",
+                target_type="plan_request",
+                target_id=req_id,
+                before_data={"status": row["status"]},
+                after_data={"status": "rejected"},
+            )
             return {"ok": True, "status": "rejected"}
         except HTTPException:
             raise

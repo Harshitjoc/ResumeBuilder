@@ -29,6 +29,15 @@ export interface PlanInfo {
   quotaExceeded: boolean
 }
 
+export type SessionStatus = 'loading' | 'signed-in' | 'signed-out' | 'anonymous'
+
+export interface SessionUser {
+  id: string
+  email: string | null
+  full_name: string | null
+  is_anonymous: boolean
+}
+
 interface AppState {
   resume: ResumeData
   apiKeys: ApiKeys | null
@@ -41,6 +50,9 @@ interface AppState {
   applications: ApplicationRecord[]
   shares: ShareRecord[]
   plan: PlanInfo
+  sessionStatus: SessionStatus
+  sessionUser: SessionUser | null
+  role: string | null
   setResume: (resume: ResumeData) => void
   updateContact: (contact: Partial<ResumeData['contact']>) => void
   updateSummary: (summary: string) => void
@@ -68,6 +80,9 @@ interface AppState {
   setPlan: (plan: Partial<PlanInfo>) => void
   decrementQuota: () => void
   setQuotaExceeded: (exceeded: boolean) => void
+  setSession: (user: SessionUser | null, status: SessionStatus) => void
+  setRole: (role: string | null) => void
+  clearSession: () => void
 }
 
 function uid() {
@@ -94,6 +109,9 @@ export const useAppStore = create<AppState>()(
         quotaLimit: null,
         quotaExceeded: false,
       },
+      sessionStatus: 'loading',
+      sessionUser: null,
+      role: null,
 
       setResume: (resume) => set({ resume }),
       updateContact: (contact) =>
@@ -186,9 +204,25 @@ export const useAppStore = create<AppState>()(
           },
         })),
       setQuotaExceeded: (quotaExceeded) => set((state) => ({ plan: { ...state.plan, quotaExceeded } })),
+      setSession: (user, sessionStatus) => set({ sessionUser: user, sessionStatus }),
+      setRole: (role) => set({ role }),
+      clearSession: () => set({ sessionStatus: 'signed-out', sessionUser: null, role: null }),
     }),
     {
       name: 'resume-builder-storage',
+      partialize: (state) => ({
+        resume: state.resume,
+        apiKeys: state.apiKeys,
+        pendingChanges: state.pendingChanges,
+        jobPosting: state.jobPosting,
+        compatibilityScore: state.compatibilityScore,
+        reports: state.reports,
+        targetUser: state.targetUser,
+        evidence: state.evidence,
+        applications: state.applications,
+        shares: state.shares,
+        plan: state.plan,
+      }),
     },
   ),
 )

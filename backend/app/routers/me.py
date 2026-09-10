@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 
+from app.deps import AuthContext, get_user_http
 from app.services.entitlements import get_cached
 
 router = APIRouter(tags=["me"])
@@ -7,16 +8,17 @@ router = APIRouter(tags=["me"])
 
 @router.get("/api/me")
 async def get_me(
+    auth: AuthContext = Depends(get_user_http),
     x_client_key: str | None = Header(None),
-    x_user_id: str | None = Header(None),
 ):
-    key = x_user_id or x_client_key or ""
-    cached = get_cached(x_user_id, x_client_key)
+    cached = get_cached(auth.user_id, auth.identity_key or x_client_key)
     return {
         "plan": cached["plan"],
         "planExpiresAt": cached["planExpiresAt"],
         "quotaRemaining": cached["quotaRemaining"],
         "quotaLimit": cached["quotaLimit"],
         "quotaUnlimited": cached["quotaUnlimited"],
-        "clientKey": x_client_key or "",
+        "clientKey": auth.client_key or "",
+        "user_id": auth.user_id or "",
+        "is_anonymous": auth.is_anonymous,
     }

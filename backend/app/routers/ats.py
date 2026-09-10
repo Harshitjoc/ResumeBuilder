@@ -1,9 +1,10 @@
 import re
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
 from app import config
+from app.deps import AuthContext, get_user_http
 from app.routers.llm import _coerce_ats_check, _service, ApiKeys
 from app.routers.upload import _extract_docx, _extract_pdf
 from app.services.entitlements import get_plan, is_pro
@@ -71,12 +72,11 @@ async def ats_file(
     job: str | None = None,
     apiKeys: str = "{}",
     targetUser: str | None = None,
-    x_client_key: str | None = Header(None),
-    x_user_id: str | None = Header(None),
+    auth: AuthContext = Depends(get_user_http),
 ):
-    identity = x_client_key or ""
-    plan = get_plan(identity, x_user_id)
-    if not is_pro(plan, x_user_id, identity_key=identity):
+    identity = auth.identity_key or ""
+    plan = get_plan(identity, auth.user_id)
+    if not is_pro(plan, auth.user_id, identity_key=identity):
         raise HTTPException(status_code=403, detail="This feature requires Pro. Upgrade from /upgrade")
 
     data = await file.read()

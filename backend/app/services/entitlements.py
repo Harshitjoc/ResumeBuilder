@@ -103,19 +103,55 @@ def is_pro(plan: str, user_id: str | None, identity_key: str | None = None, now:
         return True
 
 
-def check_and_increment(identity_key: str, day: str | None = None) -> dict[str, Any]:
+def _free_quota_limit() -> int:
+    sb = _supabase_client()
+    if sb:
+        try:
+            res = sb.table("system_settings").select("value").eq("key", "quotas").limit(1).execute()
+            if res.data:
+                setting = res.data[0].get("value") or {}
+                limit = setting.get("free_daily_llm")
+                if isinstance(limit, int) and limit > 0:
+                    return limit
+        except Exception:
+            pass
+    return config.FREE_DAILY_LLM
+
+
+def check_and_increment(
+    identity_key: str,
+    user_id: str | None = None,
+    day: str | None = None,
+) -> dict[str, Any]:
     if config.ENABLE_ENTITLEMENTS == "false":
         return {"allowed": True, "remaining": None, "limit": None}
     if not identity_key:
         return {"allowed": True, "remaining": None, "limit": None}
 
-    plan = get_plan(identity_key)
+    plan = get_plan(user_id or identity_key, user_id)
     if plan == "pro":
         return {"allowed": True, "remaining": None, "limit": None}
 
     day = day or date.today().isoformat()
-    limit = config.FREE_DAILY_LLM
 
+    sb = _supabase_client()
+    if sb and user_id:
+        try:
+            limit = _free_quota_limit()
+            res = sb.table("usage_logs").select("calls").eq("identity_key", identity_key).eq("day", day).limit(1).execute()
+            current = res.data[0]["calls"] if res.data else 0
+            if current >= limit:
+                return {"allowed": False, "remaining": 0, "limit": limit}
+            next_calls = current + 1
+            sb.table("usage_logs").upsert(
+                {"identity_key": identity_key, "day": day, "calls": next_calls},
+                on_conflict="identity_key,day",
+            ).execute()
+            return {"allowed": True, "remaining": limit - next_calls, "limit": limit}
+        except Exception:
+            pass
+
+    limit = config.FREE_DAILY_LLM
     with _lock:
         data = _read_json(_USAGE_FILE) or {}
         key_data = data.get(identity_key, {})
@@ -125,16 +161,6 @@ def check_and_increment(identity_key: str, day: str | None = None) -> dict[str, 
         key_data[day] = current + 1
         data[identity_key] = key_data
         _write_json(_USAGE_FILE, data)
-
-    sb = _supabase_client()
-    if sb:
-        try:
-            sb.table("usage_logs").upsert(
-                {"identity_key": identity_key, "day": day, "calls": current + 1},
-                on_conflict="identity_key,day",
-            ).execute()
-        except Exception:
-            pass
 
     return {"allowed": True, "remaining": limit - (current + 1), "limit": limit}
 
@@ -177,6 +203,23 @@ def get_cached(user_id: str | None, identity_key: str | None = None) -> dict[str
             "quotaUnlimited": True,
         }
     today = date.today().isoformat()
+
+    sb = _supabase_client()
+    if sb and user_id:
+        try:
+            limit = _free_quota_limit()
+            res = sb.table("usage_logs").select("calls").eq("identity_key", user_id).eq("day", today).limit(1).execute()
+            used = res.data[0]["calls"] if res.data else 0
+            return {
+                "plan": plan,
+                "planExpiresAt": None,
+                "quotaRemaining": max(0, limit - used),
+                "quotaLimit": limit,
+                "quotaUnlimited": False,
+            }
+        except Exception:
+            pass
+
     with _lock:
         usage_data = _read_json(_USAGE_FILE) or {}
         key_data = usage_data.get(key, {})
