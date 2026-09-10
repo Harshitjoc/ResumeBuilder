@@ -8,6 +8,7 @@ if anything matches. Cheap stand-in for gitleaks; run before any commit/deploy:
 Patterns are deliberately conservative to avoid flagging harmless test values.
 """
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -31,6 +32,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SKIP_FILE_SUFFIXES = (".pyc", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".eot", ".ttf", ".map", ".pdf")
 
 
+def _is_gitignored(rel: Path) -> bool:
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(ROOT), "check-ignore", "--quiet", str(rel).replace("\\", "/")],
+            capture_output=True,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def scan() -> int:
     hits = 0
     for path in sorted(ROOT.rglob("*")):
@@ -38,6 +50,8 @@ def scan() -> int:
         if any(part in EXCLUDE_DIRS for part in rel.parts):
             continue
         if not path.is_file() or rel.name in EXCLUDE_FILES or path.suffix.lower() in SKIP_FILE_SUFFIXES:
+            continue
+        if _is_gitignored(rel):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")

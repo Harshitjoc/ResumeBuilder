@@ -18,6 +18,7 @@ Thumbs.db
 
 # Supabase
 .supabase/
+supabaseSecret.txt
 
 # Agent skills library (not part of the project)
 .agents/

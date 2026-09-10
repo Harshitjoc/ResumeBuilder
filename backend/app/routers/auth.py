@@ -2,10 +2,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-import jwt as pyjwt
-
 from app import config
-from app.deps import AuthContext, require_user, supabase_enabled
+from app.deps import AuthContext, decode_token, require_user, supabase_enabled
 from app.services import audit
 from app.services.conversion import claim_anonymous_rows
 
@@ -25,8 +23,8 @@ async def claim_anonymous(
 
     The client is signed in (authenticated, non-anonymous) and passes the
     JWT of the anonymous session whose data should be claimed. The token is
-    verified with the same Supabase JWT secret; the anonymous uid is then
-    migrated to the current user via the service-role client.
+    verified with the same Supabase JWT secret (or JWKS); the anonymous uid
+    is then migrated to the current user via the service-role client.
     """
     if not supabase_enabled():
         raise HTTPException(status_code=503, detail="Supabase not configured")
@@ -34,14 +32,10 @@ async def claim_anonymous(
         raise HTTPException(status_code=403, detail="Create a free account to continue")
 
     try:
-        claims = pyjwt.decode(
-            payload.anon_token,
-            config.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            options={"require": ["exp", "sub"], "verify_aud": True},
-            audience="authenticated",
-        )
-    except Exception:
+        claims = decode_token(payload.anon_token, error_status=400)
+    except HTTPException:
+        # Preserve the client-facing contract: any failed anon-token decode
+        # surfaces as a 400 invalid-anonymous-token error.
         raise HTTPException(status_code=400, detail="Invalid anonymous token")
 
     anon_uid = claims.get("sub")

@@ -6,7 +6,10 @@ load_dotenv()
 
 SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY: str | None = os.getenv("SUPABASE_SERVICE_KEY")
+# Legacy-format projects use a shared HS256 secret; new-format projects expose
+# a JWKS endpoint (RS256). Exactly one is required for verified auth.
 SUPABASE_JWT_SECRET: str | None = os.getenv("SUPABASE_JWT_SECRET")
+SUPABASE_JWKS_URL: str | None = os.getenv("SUPABASE_JWKS_URL")
 ADMIN_EMAIL: str | None = os.getenv("ADMIN_EMAIL")
 TURNSTILE_SECRET_KEY: str | None = os.getenv("TURNSTILE_SECRET_KEY")
 

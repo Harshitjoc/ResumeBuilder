@@ -1,9 +1,11 @@
 """Verified-identity dependencies for the API.
 
-In Supabase mode (SUPABASE_URL + SUPABASE_JWT_SECRET configured) every request
-is authenticated from an HS256-signed Supabase JWT carried in
-`Authorization: Bearer <token>`. No client-supplied header is ever trusted for
-identity.
+In Supabase mode (SUPABASE_URL + a JWT secret or JWKS URL configured) every
+request is authenticated from a Supabase session JWT carried in
+`Authorization: Bearer <token>`. Legacy-format projects verify HS256 with the
+shared `SUPABASE_JWT_SECRET`; new-format projects verify against the project
+JWKS endpoint (`SUPABASE_JWKS_URL`), which may publish ES256/RS256/HS256 keys.
+No client-supplied header is ever trusted for identity.
 
 When Supabase is NOT configured (local dev / tests / browser-local MVP) the
 legacy header identity (X-Client-Key / X-User-Id) is used and no JWT
@@ -35,22 +37,61 @@ class AuthContext:
 
 
 def supabase_enabled() -> bool:
-    return bool(config.SUPABASE_URL and config.SUPABASE_JWT_SECRET)
+    return bool(config.SUPABASE_URL and (config.SUPABASE_JWT_SECRET or config.SUPABASE_JWKS_URL))
 
 
-def _verify_jwt(token: str) -> AuthContext:
+_jwk_client: Optional[pyjwt.PyJWKClient] = None
+
+
+def _get_jwk_client() -> Optional[pyjwt.PyJWKClient]:
+    global _jwk_client
+    if _jwk_client is None and config.SUPABASE_JWKS_URL:
+        _jwk_client = pyjwt.PyJWKClient(config.SUPABASE_JWKS_URL)
+    return _jwk_client
+
+
+def decode_token(token: str, *, error_status: int = 401) -> dict:
+    """Verify a Supabase session token and return its claims.
+
+    Raises HTTPException(error_status) on any failure.
+    """
+    options: dict = {
+        "require": ["exp", "sub"],
+        "verify_aud": True,
+        "verify_iat": False,  # tolerate clock skew between client and GoTrue
+    }
     try:
-        payload = pyjwt.decode(
+        if config.SUPABASE_JWT_SECRET:
+            return pyjwt.decode(
+                token,
+                config.SUPABASE_JWT_SECRET,
+                algorithms=['HS256'],
+options=options,
+                leeway=30,
+                audience="authenticated",
+            )
+        client = _get_jwk_client()
+        if not client:
+            raise HTTPException(status_code=error_status, detail="Invalid authentication token")
+        signing_key = client.get_signing_key_from_jwt(token)
+        return pyjwt.decode(
             token,
-            config.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            options={"require": ["exp", "sub"], "verify_aud": True},
+            signing_key.key,
+            algorithms=["ES256", "RS256", "HS256"],
+            options=options,
+            leeway=30,
             audience="authenticated",
         )
     except pyjwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise HTTPException(status_code=error_status, detail="Token expired")
+    except HTTPException:
+        raise
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+        raise HTTPException(status_code=error_status, detail="Invalid authentication token")
+
+
+def _verify_jwt(token: str) -> AuthContext:
+    payload = decode_token(token)
     return AuthContext(
         user_id=payload.get("sub"),
         is_anonymous=bool(payload.get("is_anonymous", False)),
