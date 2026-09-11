@@ -13,8 +13,7 @@ from typing import Any
 
 from app.services.entitlements import _supabase_client
 
-USER_ID_TABLES = ("resumes", "job_postings", "applications", "analysis_reports", "evidence")
-OWNER_ID_TABLES = ("shares",)
+USER_ID_TABLES = ("resumes", "job_postings", "applications", "analysis_reports", "evidence", "shares")
 
 
 def claim_anonymous_rows(from_user_id: str, to_user_id: str) -> dict[str, Any]:
@@ -35,18 +34,6 @@ def claim_anonymous_rows(from_user_id: str, to_user_id: str) -> dict[str, Any]:
                 sb.table(table)
                 .update({"user_id": to_user_id})
                 .eq("user_id", from_user_id)
-                .execute()
-            )
-            migrated[table] = len(res.data)
-        except Exception:
-            errors.append(table)
-
-    for table in OWNER_ID_TABLES:
-        try:
-            res = (
-                sb.table(table)
-                .update({"owner_id": to_user_id})
-                .eq("owner_id", from_user_id)
                 .execute()
             )
             migrated[table] = len(res.data)

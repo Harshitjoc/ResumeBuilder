@@ -31,13 +31,8 @@ def _write_json(path: Path, data: Any) -> None:
 
 
 def _supabase_client():
-    if not config.SUPABASE_URL or not config.SUPABASE_SERVICE_KEY:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
-    except Exception:
-        return None
+    from app.services.supabase_client import get_client
+    return get_client()
 
 
 def get_plan(identity_key: str, user_id: str | None = None) -> str:

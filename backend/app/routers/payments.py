@@ -20,13 +20,8 @@ _lock = threading.Lock()
 
 
 def _supabase_client():
-    if not config.SUPABASE_URL or not config.SUPABASE_SERVICE_KEY:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
-    except Exception:
-        return None
+    from app.services.supabase_client import get_client
+    return get_client()
 
 
 def _read_payments() -> list[dict[str, Any]]:

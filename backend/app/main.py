@@ -45,19 +45,38 @@ def _bootstrap_admin_email() -> None:
     if not (config.ADMIN_EMAIL and config.SUPABASE_URL and config.SUPABASE_SERVICE_KEY):
         return
     try:
-        from supabase import create_client
+        from app.services.supabase_client import get_client
 
-        sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
-        users = sb.auth.admin.list_users()
-        match = next((u for u in users.data if u.email == config.ADMIN_EMAIL), None)
+        sb = get_client()
+        if not sb:
+            return
+        users = _list_auth_users()
+        match = next((u for u in users if u.get("email") == config.ADMIN_EMAIL), None)
         if not match:
             return
         sb.table("profiles").upsert(
-            {"id": match.id, "role": "admin"},
+            {"id": match["id"], "role": "admin"},
             on_conflict="id",
         ).execute()
     except Exception:
         pass
+
+
+def _list_auth_users() -> list[dict]:
+    """GoTrue admin list via REST (works for both key formats)."""
+    import httpx
+
+    headers = {
+        "apikey": config.SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {config.SUPABASE_SERVICE_KEY}",
+    }
+    resp = httpx.get(
+        f"{config.SUPABASE_URL}/auth/v1/admin/users?per_page=1000",
+        headers=headers,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return (resp.json() or {}).get("users", [])
 
 
 @app.on_event("startup")
