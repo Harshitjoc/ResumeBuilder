@@ -12,6 +12,15 @@
 create schema if not exists private;
 
 -- ---------------------------------------------------------------------------
+-- profiles.role (added first: 0002 helper functions reference this column)
+-- ---------------------------------------------------------------------------
+
+alter table public.profiles add column if not exists role text not null default 'user'
+    check (role in ('user','admin','banned'));
+
+create index if not exists idx_profiles_role on public.profiles (role);
+
+-- ---------------------------------------------------------------------------
 -- Role / entitlement helpers (single source of truth for SQL-level checks)
 -- ---------------------------------------------------------------------------
 
@@ -105,15 +114,6 @@ grant execute on function private.is_anonymous() to authenticated, anon;
 grant execute on function private.is_active() to authenticated, anon;
 grant execute on function private.plan_is_pro() to authenticated, anon;
 grant execute on function private.can_create_share() to authenticated, anon;
-
--- ---------------------------------------------------------------------------
--- profiles.role
--- ---------------------------------------------------------------------------
-
-alter table public.profiles add column if not exists role text not null default 'user'
-    check (role in ('user','admin','banned'));
-
-create index if not exists idx_profiles_role on public.profiles (role);
 
 -- ---------------------------------------------------------------------------
 -- updated_at maintenance
