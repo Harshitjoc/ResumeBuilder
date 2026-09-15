@@ -25,6 +25,12 @@ alter table public.profiles add column if not exists plan text not null default 
     check (plan in ('free','pro'));
 alter table public.profiles add column if not exists plan_expires_at timestamptz;
 
+-- Account profile info surfaced on the Account page and pre-filled into resumes
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles add column if not exists phone text;
+alter table public.profiles add column if not exists location text;
+alter table public.profiles add column if not exists headline text;
+
 -- Master resumes (base copies)
 create table if not exists public.resumes (
     id uuid primary key default uuid_generate_v4(),
@@ -89,9 +95,13 @@ create table if not exists public.applications (
     job_url text,
     job_title text,
     company_name text,
-    status text default 'applied' check (status in ('applied','pending','interview','offer','rejected')),
+    status text default 'applied' check (status in ('saved','applied','pending','interview','offer','rejected')),
     applied_at timestamptz default now(),
-    updated_at timestamptz default now()
+    updated_at timestamptz default now(),
+    resume_variant jsonb,
+    ats_snapshot jsonb,
+    keyword_ledger jsonb,
+    genuine_score int
 );
 
 create index if not exists idx_applications_user_id on public.applications (user_id);
@@ -187,6 +197,8 @@ create table if not exists public.shares (
     name text not null,
     resume_snapshot jsonb not null,
     ats_score int check (ats_score between 0 and 100),
+    evidence jsonb default '[]'::jsonb,
+    heuristic_ats boolean default false,
     created_at timestamptz default now()
 );
 

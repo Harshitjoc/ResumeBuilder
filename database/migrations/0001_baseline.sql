@@ -89,9 +89,13 @@ create table if not exists public.applications (
     job_url text,
     job_title text,
     company_name text,
-    status text default 'applied' check (status in ('applied','pending','interview','offer','rejected')),
+    status text default 'applied' check (status in ('saved','applied','pending','interview','offer','rejected')),
     applied_at timestamptz default now(),
-    updated_at timestamptz default now()
+    updated_at timestamptz default now(),
+    resume_variant jsonb,
+    ats_snapshot jsonb,
+    keyword_ledger jsonb,
+    genuine_score int
 );
 
 create index if not exists idx_applications_user_id on public.applications (user_id);

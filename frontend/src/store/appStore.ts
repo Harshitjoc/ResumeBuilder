@@ -10,6 +10,10 @@ import {
   type ApplicationRecord,
   type ApplicationStatus,
   type ShareRecord,
+  type SavedTemplate,
+  type ClaimRecord,
+  type JobAnalysis,
+  type AtsCheck,
 } from '@/types/resume'
 
 interface ApiKeys {
@@ -36,6 +40,17 @@ export interface SessionUser {
   email: string | null
   full_name: string | null
   is_anonymous: boolean
+  avatarUrl?: string | null
+  phone?: string | null
+  location?: string | null
+  headline?: string | null
+}
+
+export interface PendingVariant {
+  resume: ResumeData
+  baseResume: ResumeData
+  analysis?: JobAnalysis
+  ats?: AtsCheck
 }
 
 interface AppState {
@@ -47,18 +62,23 @@ interface AppState {
   reports: ReportRecord[]
   targetUser: TargetUser | null
   evidence: EvidenceItem[]
+  confirmedClaims: ClaimRecord[]
   applications: ApplicationRecord[]
   shares: ShareRecord[]
   plan: PlanInfo
   sessionStatus: SessionStatus
   sessionUser: SessionUser | null
   role: string | null
+  features: Record<string, boolean>
+  pendingVariant?: PendingVariant
   setResume: (resume: ResumeData) => void
   updateContact: (contact: Partial<ResumeData['contact']>) => void
   updateSummary: (summary: string) => void
+  updateNotes: (notes: string) => void
   updateSkills: (skills: string[]) => void
   setTemplate: (template: ResumeData['template']) => void
   setApiKeys: (keys: ApiKeys | null) => void
+  clearApiKeys: () => void
   setPendingChanges: (changes: VerificationChange[]) => void
   updateChangeAction: (id: string, action: VerificationChange['action']) => void
   setJobPosting: (text: string) => void
@@ -71,8 +91,12 @@ interface AppState {
   addEvidence: (item: Omit<EvidenceItem, 'id'>) => void
   removeEvidence: (id: string) => void
   setEvidence: (evidence: EvidenceItem[]) => void
+  addConfirmedClaims: (claims: Array<Omit<ClaimRecord, 'id' | 'resolvedAt'>>) => void
+  setConfirmedClaims: (claims: ClaimRecord[]) => void
+  attachChangeEvidence: (changeId: string, evidenceId: string) => void
   addApplication: (data: Omit<ApplicationRecord, 'id' | 'appliedAt'>) => void
   updateApplicationStatus: (id: string, status: ApplicationStatus) => void
+  patchApplication: (id: string, patch: Partial<ApplicationRecord>) => void
   removeApplication: (id: string) => void
   setApplications: (applications: ApplicationRecord[]) => void
   addShare: (data: Omit<ShareRecord, 'id' | 'createdAt'>) => void
@@ -83,7 +107,16 @@ interface AppState {
   setQuotaExceeded: (exceeded: boolean) => void
   setSession: (user: SessionUser | null, status: SessionStatus) => void
   setRole: (role: string | null) => void
+  setFeatures: (features: Record<string, boolean>) => void
   clearSession: () => void
+  applyApprovedChanges: (dna?: { analysis?: JobAnalysis; ats?: AtsCheck }) => void
+  setPendingVariant: (pv: PendingVariant | undefined) => void
+  ownerUserId: string | null
+  setOwnerUserId: (id: string | null) => void
+  resetWorkspace: () => void
+  customTemplates: SavedTemplate[]
+  addCustomTemplate: (data: Omit<SavedTemplate, 'id' | 'createdAt'>) => void
+  removeCustomTemplate: (id: string) => void
 }
 
 function uid() {
@@ -101,6 +134,7 @@ export const useAppStore = create<AppState>()(
       reports: [],
       targetUser: null,
       evidence: [],
+      confirmedClaims: [],
       applications: [],
       shares: [],
       plan: {
@@ -113,6 +147,9 @@ export const useAppStore = create<AppState>()(
       sessionStatus: 'loading',
       sessionUser: null,
       role: null,
+      features: {},
+      ownerUserId: null,
+      customTemplates: [],
 
       setResume: (resume) => set({ resume }),
       updateContact: (contact) =>
@@ -121,12 +158,15 @@ export const useAppStore = create<AppState>()(
         })),
       updateSummary: (professionalSummary) =>
         set((state) => ({ resume: { ...state.resume, professionalSummary } })),
+      updateNotes: (notes) =>
+        set((state) => ({ resume: { ...state.resume, notes } })),
       updateSkills: (skills) =>
         set((state) => ({ resume: { ...state.resume, skills } })),
       setTemplate: (template) =>
         set((state) => ({ resume: { ...state.resume, template } })),
 
       setApiKeys: (apiKeys) => set({ apiKeys }),
+      clearApiKeys: () => set({ apiKeys: null }),
 
       setPendingChanges: (pendingChanges) => set({ pendingChanges }),
       updateChangeAction: (id, action) =>
@@ -164,6 +204,27 @@ export const useAppStore = create<AppState>()(
       removeEvidence: (id) =>
         set((state) => ({ evidence: state.evidence.filter((e) => e.id !== id) })),
       setEvidence: (evidence) => set({ evidence }),
+      addConfirmedClaims: (claims) =>
+        set((state) => {
+          const fresh = claims
+            .filter((c) => c.text?.trim())
+            .map((c) => ({
+              id: uid(),
+              resolvedAt: new Date().toISOString(),
+              ...c,
+            }))
+          if (fresh.length === 0) return state
+          return { confirmedClaims: [...fresh, ...state.confirmedClaims] }
+        }),
+      setConfirmedClaims: (confirmedClaims) => set({ confirmedClaims }),
+      attachChangeEvidence: (changeId, evidenceId) =>
+        set((state) => ({
+          pendingChanges: state.pendingChanges.map((c) =>
+            c.id === changeId
+              ? { ...c, evidenceId, verdict: 'confirmed', action: 'pending' as const }
+              : c,
+          ),
+        })),
 
       addApplication: (data) =>
         set((state) => ({
@@ -176,6 +237,12 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           applications: state.applications.map((a) =>
             a.id === id ? { ...a, status } : a,
+          ),
+        })),
+      patchApplication: (id, patch) =>
+        set((state) => ({
+          applications: state.applications.map((a) =>
+            a.id === id ? { ...a, ...patch } : a,
           ),
         })),
       removeApplication: (id) =>
@@ -208,7 +275,94 @@ export const useAppStore = create<AppState>()(
       setQuotaExceeded: (quotaExceeded) => set((state) => ({ plan: { ...state.plan, quotaExceeded } })),
       setSession: (user, sessionStatus) => set({ sessionUser: user, sessionStatus }),
       setRole: (role) => set({ role }),
-      clearSession: () => set({ sessionStatus: 'signed-out', sessionUser: null, role: null }),
+      setFeatures: (features) => set({ features }),
+      setOwnerUserId: (ownerUserId) => set({ ownerUserId }),
+      clearSession: () => set({ sessionStatus: 'signed-out', sessionUser: null, role: null, features: {} }),
+      resetWorkspace: () =>
+        set({
+          resume: emptyResume,
+          pendingChanges: [],
+          jobPosting: '',
+          compatibilityScore: null,
+          reports: [],
+          evidence: [],
+          confirmedClaims: [],
+          applications: [],
+          shares: [],
+          targetUser: null,
+          customTemplates: [],
+          pendingVariant: undefined,
+        }),
+      addCustomTemplate: (data) =>
+        set((state) => ({
+          customTemplates: [
+            { id: uid(), createdAt: new Date().toISOString(), ...data },
+            ...state.customTemplates,
+          ],
+        })),
+      removeCustomTemplate: (id) =>
+        set((state) => ({
+          customTemplates: state.customTemplates.filter((t) => t.id !== id),
+        })),
+
+      setPendingVariant: (pendingVariant) => set({ pendingVariant }),
+
+      applyApprovedChanges: (dna) =>
+        set((state) => {
+          const baseResume = { ...state.resume }
+          const resume = { ...state.resume }
+          const approved = state.pendingChanges.filter(
+            (c) => c.action === 'approved' || c.action === 'edited',
+          )
+          if (approved.length === 0) return state
+
+          for (const change of approved) {
+            const sec = change.section.toLowerCase()
+            const orig = change.original
+            const cust = change.customized
+
+            if (sec === 'summary' || sec === 'professional_summary') {
+              resume.professionalSummary = cust
+            } else if (sec === 'skills') {
+              const idx = resume.skills.findIndex((s) => s === orig || s.includes(orig) || orig.includes(s))
+              if (idx >= 0) resume.skills = resume.skills.map((s, i) => (i === idx ? cust : s))
+            } else if (sec.includes('experience') || sec === 'work_experience') {
+              resume.experience = resume.experience.map((exp) => ({
+                ...exp,
+                bullets: exp.bullets.map((b) => (b === orig || b.includes(orig) || orig.includes(b) ? cust : b)),
+              }))
+            } else if (sec.includes('education')) {
+              resume.education = resume.education.map((edu) => ({
+                ...edu,
+                degree: edu.degree === orig || edu.degree.includes(orig) ? cust : edu.degree,
+              }))
+            } else if (sec.includes('project')) {
+              resume.projects = resume.projects.map((proj) => ({
+                ...proj,
+                description: proj.description === orig || proj.description.includes(orig) || orig.includes(proj.description) ? cust : proj.description,
+                technologies: proj.technologies.map((t) => (t === orig || t.includes(orig) || orig.includes(t) ? cust : t)),
+              }))
+            } else if (sec.includes('cert')) {
+              resume.certifications = resume.certifications.map((cert) => ({
+                ...cert,
+                name: cert.name === orig || cert.name.includes(orig) ? cust : cert.name,
+              }))
+            } else if (sec === 'notes') {
+              resume.notes = cust
+            }
+          }
+
+          return {
+            resume,
+            pendingChanges: [],
+            pendingVariant: {
+              resume,
+              baseResume: state.pendingVariant?.baseResume ?? baseResume,
+              analysis: dna?.analysis ?? state.pendingVariant?.analysis,
+              ats: dna?.ats ?? state.pendingVariant?.ats,
+            },
+          }
+        }),
     }),
     {
       name: 'resume-builder-storage',
@@ -221,9 +375,14 @@ export const useAppStore = create<AppState>()(
         reports: state.reports,
         targetUser: state.targetUser,
         evidence: state.evidence,
+        confirmedClaims: state.confirmedClaims,
         applications: state.applications,
         shares: state.shares,
         plan: state.plan,
+        ownerUserId: state.ownerUserId,
+        sessionStatus: state.sessionStatus,
+        customTemplates: state.customTemplates,
+        pendingVariant: state.pendingVariant,
       }),
     },
   ),

@@ -11,6 +11,7 @@ export async function refreshPlan(): Promise<void> {
       quotaLimit: me.quotaLimit,
     })
     useAppStore.getState().setRole(me.role ?? null)
+    useAppStore.getState().setFeatures(me.features ?? {})
   } catch {
     // Backend unreachable — keep whatever plan state we already have.
   }

@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from app import config
 from app.deps import AuthContext, get_user_http
@@ -9,12 +10,26 @@ from app.routers.llm import _coerce_ats_check, _service, ApiKeys
 from app.routers.upload import _extract_docx, _extract_pdf
 from app.services.entitlements import get_plan, is_pro
 from app.services.prompts import file_ats_prompt, sanitize_target_user
+from app.services.shadow import shadow_check
 
 router = APIRouter(prefix="/api/ats", tags=["ats"])
 
 MAX_SIZE = 10 * 1024 * 1024
 
 REQUIRED_HEADERS = ["contact", "education", "work", "projects", "skills", "experience", "summary"]
+
+
+class ShadowAtsRequest(BaseModel):
+    resume: dict[str, Any]
+    job: dict[str, Any] | None = None
+
+
+@router.post("/shadow")
+async def ats_shadow(body: ShadowAtsRequest):
+    """Deterministic, offline ATS read. Free and not quota-metered — no LLM."""
+    result = shadow_check(body.resume, body.job)
+    check = {k: v for k, v in result.items() if k != "keywordLedger"}
+    return {"check": check, "keywordLedger": result.get("keywordLedger", []), "heuristic": True}
 
 
 def _deterministic_checks(text: str) -> dict[str, Any]:

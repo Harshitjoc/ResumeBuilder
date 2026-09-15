@@ -26,6 +26,8 @@ async def get_me(
     x_client_key: str | None = Header(None),
 ):
     cached = get_cached(auth.user_id, auth.identity_key or x_client_key)
+    from app.services.entitlements import get_feature_flags
+
     return {
         "plan": cached["plan"],
         "planExpiresAt": cached["planExpiresAt"],
@@ -36,6 +38,7 @@ async def get_me(
         "user_id": auth.user_id or "",
         "is_anonymous": auth.is_anonymous,
         "role": _profile_role(auth.user_id),
+        "features": get_feature_flags(),
     }
 
 

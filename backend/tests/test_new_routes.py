@@ -218,6 +218,78 @@ def test_evidence_builder_empty_parsed():
     assert build_evidence(None) == []
 
 
+# --------------------------------------------------------------------------
+# Phase 2: interview-prep truth-layer coercion (no LLM needed)
+# --------------------------------------------------------------------------
+def _coerce(raw):
+    from app.routers.llm import _coerce_interview_prep
+    return _coerce_interview_prep(raw)
+
+
+def test_prep_coerces_string_items_to_in_resume():
+    prep, summary = _coerce(
+        {
+            "likely_questions": ["Tell me about your React experience"],
+            "company_research": ["Acme roadmap"],
+            "talking_points": ["I shipped X"],
+            "questions_to_ask": ["What is the team size?"],
+        }
+    )
+    assert prep["likely_questions"] == ["Tell me about your React experience"]
+    assert prep["talking_points"] == ["I shipped X"]
+    assert prep["truth_points"] and prep["truth_points"][0]["status"] == "in-resume"
+    assert summary["inResume"] == 2
+    assert summary["proofBacked"] == 0
+
+
+def test_prep_coerces_object_items_with_status():
+    prep, summary = _coerce(
+        {
+            "likely_questions": [
+                {"text": "Explain the latency win", "status": "proof-backed", "section": "experience", "claimId": "claim-2", "proof": "Cut latency 40%"}
+            ],
+            "talking_points": [
+                {"text": "kubernetes 101", "status": "needs-research"},
+                "Plain bullet",
+            ],
+        }
+    )
+    assert prep["likely_questions"] == ["Explain the latency win"]
+    assert prep["truth_points"][0]["status"] == "proof-backed"
+    assert prep["truth_points"][0]["proof"] == "Cut latency 40%"
+    assert prep["talking_points"] == ["kubernetes 101", "Plain bullet"]
+    assert summary["proofBacked"] == 1
+    assert summary["needsResearch"] == 1
+    assert summary["inResume"] == 1
+
+
+def test_prep_coerces_bad_status_to_in_resume():
+    prep, _ = _coerce({"talking_points": [{"text": "x", "status": "garbage"}]})
+    assert prep["truth_points"][0]["status"] == "in-resume"
+
+
+def test_prep_drops_empty_items():
+    prep, summary = _coerce({"likely_questions": ["", None, {"text": ""}], "talking_points": []})
+    assert prep["likely_questions"] == []
+    assert prep["truth_points"] == []
+    assert summary == {"proofBacked": 0, "inResume": 0, "needsResearch": 0}
+
+
+def test_prep_request_accepts_evidence_fields():
+    resp = client.post(
+        "/api/llm/generate-interview-prep",
+        json={
+            "resume": SAMPLE_RESUME,
+            "job": SAMPLE_JOB,
+            "apiKeys": {"provider": "bogus"},
+            "focusKeywords": ["kubernetes"],
+            "evidence": [{"id": "e1", "text": "Migrated 2M records"}],
+            "confirmedClaims": [{"id": "c1", "text": "Built dashboards", "verdict": "confirmed"}],
+        },
+    )
+    assert resp.status_code == 400, resp.text  # bad provider -> 400 (payload accepted)
+
+
 if __name__ == "__main__":
     failures = 0
     tests = [
@@ -234,6 +306,11 @@ if __name__ == "__main__":
         test_evidence_builder_categories_and_ids,
         test_evidence_builder_comma_skills_and_garbage_safe,
         test_evidence_builder_empty_parsed,
+        test_prep_coerces_string_items_to_in_resume,
+        test_prep_coerces_object_items_with_status,
+        test_prep_coerces_bad_status_to_in_resume,
+        test_prep_drops_empty_items,
+        test_prep_request_accepts_evidence_fields,
     ]
     for t in tests:
         print(f"== {t.__name__}")

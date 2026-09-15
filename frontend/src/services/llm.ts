@@ -9,6 +9,10 @@ import type {
   InterviewPrep,
   CoverLetterResult,
   ParseResumeResult,
+  EvidenceItem,
+  VerifiabilityResult,
+  KeywordEntry,
+  TruthSummary,
 } from '@/types/resume'
 
 const BASE = import.meta.env.VITE_API_URL || ''
@@ -80,6 +84,7 @@ export interface MeResponse {
   user_id: string
   is_anonymous: boolean
   role: string | null
+  features?: Record<string, boolean>
 }
 
 export interface PaymentMeta {
@@ -107,7 +112,9 @@ export interface CreateShareResult {
   slug: string
   name: string
   atsScore: number | null
+  evidence: EvidenceItem[]
   createdAt: string
+  heuristicAts?: boolean | null
 }
 
 export interface PublicShareData {
@@ -115,6 +122,9 @@ export interface PublicShareData {
   createdAt: string
   atsScore: number | null
   resume: ResumeData
+  evidence: EvidenceItem[]
+  heuristicAts?: boolean | null
+  ref?: string | null
 }
 
 export interface JobEntity {
@@ -174,6 +184,9 @@ export async function createShare(data: {
   name: string
   atsScore?: number | null
   resume: ResumeData
+  evidence?: EvidenceItem[]
+  heuristicAts?: boolean | null
+  ref?: string | null
 }): Promise<CreateShareResult> {
   return post('/api/shares', data)
 }
@@ -252,10 +265,12 @@ export async function customizeResume(
   compatibility: JobAnalysis,
   apiKeys: Record<string, string>,
   targetUser?: TargetUser,
+  evidence?: EvidenceItem[],
 ): Promise<{
   customizations: Array<Record<string, unknown>>
   customization_summary?: string
   ready_for_verification?: boolean
+  verifiability?: VerifiabilityResult
 }> {
   return post('/api/llm/customize-resume', {
     resume,
@@ -263,6 +278,7 @@ export async function customizeResume(
     compatibility,
     apiKeys,
     targetUser,
+    evidence,
   })
 }
 
@@ -288,8 +304,9 @@ export async function analyzeResume(
   resume: ResumeData,
   apiKeys: Record<string, string>,
   targetUser?: TargetUser,
-): Promise<{ analysis: ResumeAnalysis }> {
-  return post('/api/llm/analyze-resume', { resume, apiKeys, targetUser })
+  evidence?: EvidenceItem[],
+): Promise<{ analysis: ResumeAnalysis; verifiability?: VerifiabilityResult }> {
+  return post('/api/llm/analyze-resume', { resume, apiKeys, targetUser, evidence })
 }
 
 export async function extractResumeText(file: File): Promise<{ text: string }> {
@@ -304,8 +321,9 @@ export async function atsCheck(
   job: Record<string, unknown> | null,
   apiKeys: Record<string, string>,
   targetUser?: TargetUser,
-): Promise<{ check: AtsCheck }> {
-  return post('/api/llm/ats-check', { resume, job, apiKeys, targetUser })
+  evidence?: EvidenceItem[],
+): Promise<{ check: AtsCheck; verifiability?: VerifiabilityResult }> {
+  return post('/api/llm/ats-check', { resume, job, apiKeys, targetUser, evidence })
 }
 
 export async function generateCoverLetter(
@@ -322,6 +340,46 @@ export async function generateInterviewPrep(
   job: Record<string, unknown>,
   apiKeys: Record<string, string>,
   targetUser?: TargetUser,
-): Promise<{ prep: InterviewPrep }> {
-  return post('/api/llm/generate-interview-prep', { resume, job, apiKeys, targetUser })
+  focusKeywords?: string[],
+  evidence?: EvidenceItem[],
+  confirmedClaims?: Array<{ id: string; text: string; verdict: string; evidenceId?: string }>,
+): Promise<{ prep: InterviewPrep; truthSummary?: TruthSummary }> {
+  return post('/api/llm/generate-interview-prep', {
+    resume,
+    job,
+    apiKeys,
+    targetUser,
+    focusKeywords,
+    evidence,
+    confirmedClaims,
+  })
+}
+
+export async function atsShadowCheck(
+  resume: ResumeData,
+  job?: JobAnalysis | Record<string, unknown> | null,
+): Promise<{ check: AtsCheck; keywordLedger: KeywordEntry[]; heuristic: boolean }> {
+  return post('/api/ats/shadow', { resume, job: job ?? null })
+}
+
+export async function redesignResume(
+  resume: Record<string, unknown>,
+  job: Record<string, unknown>,
+  compatibility: Record<string, unknown>,
+  apiKeys: Record<string, string>,
+  targetUser?: TargetUser,
+  evidence?: EvidenceItem[],
+): Promise<{
+  customizations?: Array<Record<string, unknown>>
+  customization_summary?: string
+  verifiability?: VerifiabilityResult
+}> {
+  return post('/api/llm/redesign-resume', {
+    resume,
+    job,
+    compatibility,
+    apiKeys,
+    targetUser,
+    evidence,
+  })
 }

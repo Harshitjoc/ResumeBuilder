@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { QrCode, CheckCircle2, Crown, Loader2, Phone, ArrowLeft, ShieldCheck, Clock } from 'lucide-react'
+import { QrCode, CheckCircle2, Crown, Loader2, Phone, ArrowLeft, ShieldCheck, Clock, IndianRupee } from 'lucide-react'
 import QRCode from 'qrcode'
 import { useAppStore } from '@/store/appStore'
 import { refreshPlan } from '@/services/plan'
@@ -8,9 +8,9 @@ import { getPaymentMeta, createPaymentRequest, myPaymentRequests } from '@/servi
 import type { PaymentMeta, PaymentRequestItem } from '@/services/llm'
 
 const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-700',
-  approved: 'bg-emerald-100 text-emerald-700',
-  rejected: 'bg-red-100 text-red-700',
+  pending: 'chip bg-amber-100 text-amber-800',
+  approved: 'chip bg-emerald-100 text-emerald-700',
+  rejected: 'chip bg-red-100 text-red-700',
 }
 
 export default function UpgradePage() {
@@ -50,7 +50,7 @@ export default function UpgradePage() {
 
   useEffect(() => {
     if (!upiUrl) return
-    QRCode.toDataURL(upiUrl, { width: 220, margin: 1, color: { dark: '#0f172a', light: '#ffffff' } })
+    QRCode.toDataURL(upiUrl, { width: 220, margin: 1, color: { dark: '#101730', light: '#ffffff' } })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(''))
   }, [upiUrl])
@@ -80,15 +80,20 @@ export default function UpgradePage() {
         <ArrowLeft className="h-4 w-4" /> Back
       </Link>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="sheet p-6">
         <div className="mb-2 flex items-center gap-2">
-          <Crown className="h-5 w-5 text-amber-500" />
-          <h1 className="text-lg font-semibold text-slate-900">Upgrade to Pro</h1>
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-100">
+            <Crown className="h-5 w-5 text-amber-600" />
+          </span>
+          <div>
+            <p className="eyebrow mb-0.5">Plan</p>
+            <h1 className="text-lg font-semibold tracking-tight text-slate-900">Upgrade to Pro</h1>
+          </div>
         </div>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm leading-relaxed text-slate-500">
           {tier === 'pro'
             ? 'You are on Pro.'
-            : 'Unlock ATS checks, cover letters, interview prep, the application tracker, hosted share links and unlimited processing.'}
+            : 'Unlock ATS checks, cover letters, interview prep, the application tracker, hosted share links and unlimited processing — one payment, twelve months.'}
         </p>
         {tier === 'pro' && (
           <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700">
@@ -97,97 +102,97 @@ export default function UpgradePage() {
             {expiresAt && ` — valid until ${new Date(expiresAt).toLocaleDateString()}`}
           </div>
         )}
-        <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+        <div className="mt-4 flex flex-wrap gap-2">
           {['Unlimited daily processing', 'ATS checks (incl. file upload)', 'Cover letters + interview prep', 'Application tracker', 'Hosted share links + score badge'].map(
             (f) => (
-              <span key={f} className="rounded-full bg-slate-100 px-2.5 py-1">{f}</span>
+              <span key={f} className="chip bg-blue-50 text-blue-800">
+                {f}
+              </span>
             ),
           )}
         </div>
       </div>
 
       {tier === 'free' && (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="grid gap-6 sm:grid-cols-[auto_1fr]">
+        <div className="sheet overflow-hidden">
+          <div className="border-b border-dashed border-slate-300 px-6 py-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <IndianRupee className="h-4 w-4 text-slate-500" />
+                <span className="font-mono text-2xl font-semibold tracking-tight text-slate-900">
+                  {meta?.amount ?? '—'}
+                </span>
+                <span className="eyebrow">{meta?.currency ?? 'INR'} · one time</span>
+              </div>
+              <span className="ticket">
+                <span className="ticket-label">Pro</span>
+                <span className="ticket-value">{meta?.subscriptionMonths ?? 12} months</span>
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              No auto-renewal. Pay via any UPI app by scanning the QR (or to{' '}
+              <span className="font-mono text-xs text-slate-700">{meta?.upiId ?? 'your UPI ID'}</span>), then share the
+              UTR number below.
+            </p>
+          </div>
+
+          <div className="grid gap-6 p-6 sm:grid-cols-[auto_1fr]">
             <div className="mx-auto">
               {qrDataUrl ? (
-                <img src={qrDataUrl} alt="UPI QR code" className="h-52 w-52 rounded-xl border border-slate-200" />
+                <img src={qrDataUrl} alt="UPI QR code" className="h-52 w-52 rounded-xl border border-slate-300 bg-white p-1" />
               ) : meta?.upiId ? (
-                <div className="flex h-52 w-52 items-center justify-center rounded-xl bg-slate-50 text-slate-400">
+                <div className="flex h-52 w-52 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
                   <Loader2 className="h-6 w-6 animate-spin" />
                 </div>
               ) : (
-                <div className="flex h-52 w-52 flex-col items-center justify-center gap-2 rounded-xl bg-slate-50 text-center text-xs text-slate-400">
+                <div className="flex h-52 w-52 flex-col items-center justify-center gap-2 rounded-xl bg-slate-100 text-center text-xs text-slate-400">
                   <QrCode className="h-8 w-8" />
                   Payment not configured.
                 </div>
               )}
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-slate-900">
-                One-time payment · {meta?.currency ?? 'INR'} {meta?.amount ?? '—'}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {meta?.subscriptionMonths ?? 12}-month Pro plan, no auto-renewal. Pay via any UPI app by scanning the QR
-                (or to <span className="font-medium text-slate-700">{meta?.upiId ?? 'your UPI ID'}</span>), then share
-                the <span className="font-medium text-slate-700">UTR number</span> below.
+            <div className="space-y-3">
+              <p className="text-sm leading-relaxed text-slate-500">
+                <span className="eyebrow block mb-1">How it works</span>
+                Pay the amount above, then enter your{' '}
+                <span className="font-medium text-slate-800">UPI transaction reference (UTR)</span>. We verify the
+                credit and unlock Pro — usually within 24 hours.
               </p>
-              <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
-                <Phone className="h-3.5 w-3.5" /> We verify the credit manually and unlock Pro — usually within 24 hours.
+              <p className="flex items-center gap-1.5 text-xs text-slate-400">
+                <Phone className="h-3.5 w-3.5" /> No payment gateway — your money goes straight to the UPI ID above.
               </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <input className="input" placeholder="Your name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
+                <input type="email" className="input" placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <input className="input font-mono text-xs" placeholder="UPI transaction UTR number *" value={utr} onChange={(e) => setUtr(e.target.value)} />
+              </div>
+              <button onClick={handleSubmit} disabled={!utr.trim() || submitting} className="btn-pencil">
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                I've paid — submit UTR
+              </button>
+              {message && (
+                <p
+                  className={`rounded-lg p-3 text-sm ${
+                    message.kind === 'ok' ? 'bg-highlight-soft text-slate-800 ring-1 ring-highlight/60' : 'bg-red-50 text-red-700'
+                  }`}
+                >
+                  {message.text}
+                </p>
+              )}
             </div>
           </div>
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">
-            <input
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
-              placeholder="Your name (optional)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <input
-              type="email"
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
-              placeholder="Email (optional)"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <input
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
-              placeholder="UPI transaction UTR number *"
-              value={utr}
-              onChange={(e) => setUtr(e.target.value)}
-            />
-          </div>
-          <button
-            onClick={handleSubmit}
-            disabled={!utr.trim() || submitting}
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-          >
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-            I've paid — submit UTR
-          </button>
-          {message && (
-            <p
-              className={`mt-3 rounded-lg p-3 text-sm ${
-                message.kind === 'ok' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'
-              }`}
-            >
-              {message.text}
-            </p>
-          )}
         </div>
       )}
 
       {myRequests.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="sheet p-6">
           <div className="mb-3 flex items-center gap-2">
-            <Clock className="h-5 w-5 text-slate-600" />
-            <h2 className="text-base font-semibold text-slate-900">Your payment requests</h2>
+            <Clock className="h-4 w-4 text-slate-500" />
+            <h2 className="text-base font-semibold tracking-tight text-slate-900">Your payment requests</h2>
           </div>
           <div className="space-y-2">
             {myRequests.map((r) => (
-              <div key={r.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+              <div key={r.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-paper px-3 py-2 text-sm">
                 <div>
                   <p className="font-medium text-slate-800">
                     UTR <span className="font-mono">{r.utr}</span>
@@ -195,9 +200,7 @@ export default function UpgradePage() {
                   </p>
                   <p className="text-xs text-slate-400">{new Date(r.createdAt).toLocaleString()}</p>
                 </div>
-                <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLES[r.status] ?? ''}`}>
-                  {r.status}
-                </span>
+                <span className={STATUS_STYLES[r.status] ?? ''}>{r.status}</span>
               </div>
             ))}
           </div>

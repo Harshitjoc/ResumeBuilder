@@ -5,11 +5,13 @@ from pydantic import BaseModel
 
 from app import config
 from app.deps import AuthContext, get_user_http
-from app.services.entitlements import check_and_increment
+from app.services.entitlements import check_and_increment, feature_enabled
 from app.services.extract import (
+    apply_hard_gate,
     build_contact_confidence,
     build_evidence,
     extract_contacts,
+    verifiable_claims,
 )
 from app.services.llm import LLMService
 from app.services.prompts import (
@@ -21,6 +23,7 @@ from app.services.prompts import (
     interview_prep_prompt,
     job_parsing_prompt,
     parse_resume_prompt,
+    redesign_resume_prompt,
     professional_summary_prompt,
     sanitize_target_user,
 )
@@ -83,6 +86,16 @@ class CustomizeResumeRequest(BaseModel):
     compatibility: dict[str, Any]
     apiKeys: ApiKeys
     targetUser: str | None = None
+    evidence: list[dict[str, Any]] | None = None
+
+
+class RedesignResumeRequest(BaseModel):
+    resume: dict[str, Any]
+    job: dict[str, Any]
+    compatibility: dict[str, Any]
+    apiKeys: ApiKeys
+    targetUser: str | None = None
+    evidence: list[dict[str, Any]] | None = None
 
 
 class ParseResumeRequest(BaseModel):
@@ -95,6 +108,7 @@ class AnalyzeResumeRequest(BaseModel):
     resume: dict[str, Any]
     apiKeys: ApiKeys
     targetUser: str | None = None
+    evidence: list[dict[str, Any]] | None = None
 
 
 class AtsCheckRequest(BaseModel):
@@ -102,6 +116,7 @@ class AtsCheckRequest(BaseModel):
     job: dict[str, Any] | None = None
     apiKeys: ApiKeys
     targetUser: str | None = None
+    evidence: list[dict[str, Any]] | None = None
 
 
 class GenerateCoverLetterRequest(BaseModel):
@@ -116,6 +131,9 @@ class GenerateInterviewPrepRequest(BaseModel):
     job: dict[str, Any]
     apiKeys: ApiKeys
     targetUser: str | None = None
+    focusKeywords: list[str] | None = None
+    evidence: list[dict[str, Any]] | None = None
+    confirmedClaims: list[dict[str, Any]] | None = None
 
 
 def _service(keys: ApiKeys) -> LLMService:
@@ -129,6 +147,10 @@ def _service(keys: ApiKeys) -> LLMService:
 # Lenient coercion for imperfect model output (small local models such as
 # qwen3:0.6b produce structurally imperfect JSON). Coerce, never reject.
 # --------------------------------------------------------------------------
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -210,16 +232,69 @@ def _coerce_cover_letter(raw: Any) -> dict[str, Any]:
     return {"letter": letter}
 
 
-def _coerce_interview_prep(raw: Any) -> dict[str, Any]:
-    data = _as_dict(raw)
-    return {
-        "prep": {
-            "likely_questions": _as_str_list(data.get("likely_questions")),
-            "company_research": _as_str_list(data.get("company_research")),
-            "talking_points": _as_str_list(data.get("talking_points")),
-            "questions_to_ask": _as_str_list(data.get("questions_to_ask")),
+def _flatten_text_items(value: Any) -> list[str]:
+    """String-ify list items regardless of whether they are plain strings or
+    objects ({text|point: ...}). Used for prep arrays the UI renders as text."""
+    out: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, dict):
+            text = _as_str(item.get("text")) or _as_str(item.get("point"))
+        else:
+            text = _as_str(item)
+        if text:
+            out.append(text)
+    return out
+
+
+def _coerce_prep_point(item: Any) -> dict[str, Any] | None:
+    if isinstance(item, dict):
+        text = _as_str(item.get("text")) or _as_str(item.get("point"))
+        status = item.get("status")
+        if status not in ("proof-backed", "in-resume", "needs-research"):
+            status = "in-resume"
+        if not text:
+            return None
+        return {
+            "text": text,
+            "section": _as_str(item.get("section")) or None,
+            "claimId": _as_str(item.get("claimId")) or None,
+            "status": status,
+            "proof": _as_str(item.get("proof")) or None,
         }
+    text = _as_str(item)
+    if not text:
+        return None
+    return {"text": text, "status": "in-resume"}
+
+
+def _coerce_interview_prep(raw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Coerce the prep response and derive the truth summary (Phase 2).
+
+    String AND object items are accepted; object items carry the truth-layer
+    status (proof-backed | in-resume | needs-research). Returns (prep, summary).
+    """
+    data = _as_dict(raw)
+    truth_points: list[dict[str, Any]] = []
+    for item in _as_list(data.get("likely_questions")):
+        if point := _coerce_prep_point(item):
+            truth_points.append({**point, "kind": "question"})
+    for item in _as_list(data.get("talking_points")):
+        if point := _coerce_prep_point(item):
+            truth_points.append({**point, "kind": "talking-point"})
+
+    prep = {
+        "likely_questions": _flatten_text_items(data.get("likely_questions")),
+        "company_research": _flatten_text_items(data.get("company_research")),
+        "talking_points": _flatten_text_items(data.get("talking_points")),
+        "questions_to_ask": _flatten_text_items(data.get("questions_to_ask")),
+        "truth_points": truth_points,
     }
+    summary = {
+        "proofBacked": sum(1 for p in truth_points if p["status"] == "proof-backed"),
+        "inResume": sum(1 for p in truth_points if p["status"] == "in-resume"),
+        "needsResearch": sum(1 for p in truth_points if p["status"] == "needs-research"),
+    }
+    return prep, summary
 
 
 def _normalize_customization(item: Any) -> dict[str, Any] | None:
@@ -335,6 +410,7 @@ async def customize_resume(req: CustomizeResumeRequest):
                 req.job,
                 req.compatibility,
                 target_user=sanitize_target_user(req.targetUser),
+                evidence=req.evidence,
             ),
             max_tokens=4000,
         )
@@ -347,7 +423,40 @@ async def customize_resume(req: CustomizeResumeRequest):
         for item in data.get("customizations", [])
         if (normalized := _normalize_customization(item)) is not None
     ]
-    data["customizations"] = customizations
+    data["customizations"] = apply_hard_gate(customizations, req.evidence)
+    data["verifiability"] = verifiable_claims(
+        req.resume, req.evidence or [], confirmed=[]
+    )
+    return data
+
+
+@router.post("/redesign-resume")
+async def redesign_resume(req: RedesignResumeRequest):
+    llm = _service(req.apiKeys)
+    try:
+        result = llm.generate_json(
+            redesign_resume_prompt(
+                req.resume,
+                req.job,
+                req.compatibility,
+                target_user=sanitize_target_user(req.targetUser),
+                evidence=req.evidence,
+            ),
+            max_tokens=4000,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
+
+    data = _as_dict(result)
+    customizations = [
+        normalized
+        for item in data.get("customizations", [])
+        if (normalized := _normalize_customization(item)) is not None
+    ]
+    data["customizations"] = apply_hard_gate(customizations, req.evidence)
+    data["verifiability"] = verifiable_claims(
+        req.resume, req.evidence or [], confirmed=[]
+    )
     return data
 
 
@@ -386,7 +495,12 @@ async def analyze_resume(req: AnalyzeResumeRequest):
             ),
             max_tokens=2000,
         )
-        return {"analysis": analysis}
+        return {
+            "analysis": analysis,
+            "verifiability": verifiable_claims(
+                req.resume, req.evidence or [], confirmed=[]
+            ),
+        }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
 
@@ -403,13 +517,20 @@ async def ats_check(req: AtsCheckRequest):
             ),
             max_tokens=2000,
         )
-        return _coerce_ats_check(raw)
+        return {
+            **_coerce_ats_check(raw),
+            "verifiability": verifiable_claims(
+                req.resume, req.evidence or [], confirmed=[]
+            ),
+        }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
 
 
 @router.post("/generate-cover-letter")
 async def generate_cover_letter(req: GenerateCoverLetterRequest):
+    if not feature_enabled("cover_letters"):
+        raise HTTPException(status_code=503, detail="Cover letters are currently disabled by the admin")
     llm = _service(req.apiKeys)
     try:
         raw = llm.generate_json(
@@ -427,16 +548,23 @@ async def generate_cover_letter(req: GenerateCoverLetterRequest):
 
 @router.post("/generate-interview-prep")
 async def generate_interview_prep(req: GenerateInterviewPrepRequest):
+    if not feature_enabled("interview_prep"):
+        raise HTTPException(status_code=503, detail="Interview prep is currently disabled by the admin")
     llm = _service(req.apiKeys)
     try:
+        focus = [f for f in (req.focusKeywords or []) if isinstance(f, str) and f.strip()]
         raw = llm.generate_json(
             interview_prep_prompt(
                 req.resume,
                 req.job,
                 target_user=sanitize_target_user(req.targetUser),
+                focus_keywords=focus or None,
+                evidence=req.evidence,
+                confirmed_claims=req.confirmedClaims,
             ),
             max_tokens=2000,
         )
-        return _coerce_interview_prep(raw)
+        prep, truth_summary = _coerce_interview_prep(raw)
+        return {"prep": prep, "truthSummary": truth_summary}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")

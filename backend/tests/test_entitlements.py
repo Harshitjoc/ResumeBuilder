@@ -260,6 +260,55 @@ def test_share_badge_no_score():
     assert "ATS --" in badge_resp.text
 
 
+def test_share_ref_persisted():
+    create_resp = client.post(
+        "/api/payments/request",
+        json={"utr": "UTR_REF_001"},
+        headers={"X-Client-Key": "t-pro-ref"},
+    )
+    req_id = create_resp.json()["requestId"]
+    client.post(
+        f"/api/payments/requests/{req_id}/approve",
+        headers={"Authorization": "Bearer admin-dev"},
+    )
+    share_resp = client.post(
+        "/api/shares/",
+        json={
+            "name": "Referred Resume",
+            "atsScore": 91,
+            "resume": SAMPLE_RESUME,
+            "ref": "clientkey-abc-123",
+        },
+        headers={"X-Client-Key": "t-pro-ref"},
+    )
+    assert share_resp.status_code == 200, share_resp.text
+    assert share_resp.json()["ref"] == "clientkey-abc-123"
+
+    get_resp = client.get(f"/api/shares/{share_resp.json()['slug']}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["ref"] == "clientkey-abc-123"
+
+
+def test_share_ref_absent_defaults_none():
+    create_resp = client.post(
+        "/api/payments/request",
+        json={"utr": "UTR_REF_NONE_001"},
+        headers={"X-Client-Key": "t-pro-refnone"},
+    )
+    req_id = create_resp.json()["requestId"]
+    client.post(
+        f"/api/payments/requests/{req_id}/approve",
+        headers={"Authorization": "Bearer admin-dev"},
+    )
+    share_resp = client.post(
+        "/api/shares/",
+        json={"name": "Plain Resume", "resume": SAMPLE_RESUME},
+        headers={"X-Client-Key": "t-pro-refnone"},
+    )
+    assert share_resp.status_code == 200
+    assert share_resp.json().get("ref") is None
+
+
 # ── Quota ───────────────────────────────────────────────────────────────
 def test_quota_check_and_increment_unit():
     old = entitlements.config.FREE_DAILY_LLM

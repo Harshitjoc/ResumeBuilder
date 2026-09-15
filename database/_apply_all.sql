@@ -94,9 +94,13 @@ create table if not exists public.applications (
     job_url text,
     job_title text,
     company_name text,
-    status text default 'applied' check (status in ('applied','pending','interview','offer','rejected')),
+status text default 'applied' check (status in ('saved','applied','pending','interview','offer','rejected')),
     applied_at timestamptz default now(),
-    updated_at timestamptz default now()
+    updated_at timestamptz default now(),
+    resume_variant jsonb,
+    ats_snapshot jsonb,
+    keyword_ledger jsonb,
+    genuine_score int
 );
 
 create index if not exists idx_applications_user_id on public.applications (user_id);
@@ -820,3 +824,28 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- ============ 0008_application_dna.sql ============
+-- 0008_application_dna.sql
+-- Application DNA (Phase 1): per-application resume variant, ATS snapshot,
+-- keyword ledger and genuine score; plus 'saved' as an initial status.
+
+alter table public.applications add column if not exists resume_variant jsonb;
+alter table public.applications add column if not exists ats_snapshot jsonb;
+alter table public.applications add column if not exists keyword_ledger jsonb;
+alter table public.applications add column if not exists genuine_score int;
+
+alter table public.applications drop constraint if exists applications_status_check;
+alter table public.applications add constraint applications_status_check
+    check (status in ('saved','applied','pending','interview','offer','rejected'));
+
+-- ============ 0009_share_recruiter_view.sql ============
+-- 0009_share_recruiter_view.sql
+-- Phase 2: mark hosted shares whose ATS score is the heuristic/offline read.
+
+alter table public.shares add column if not exists heuristic_ats boolean default false;
+-- ============ 00010_share_referral.sql ============
+-- 00010_share_referral.sql
+-- Phase 3: optional referral attribution on hosted shares (consent-first, informational only).
+
+alter table public.shares add column if not exists referrer text;

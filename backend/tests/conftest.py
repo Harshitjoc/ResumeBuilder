@@ -17,6 +17,7 @@ def _isolate_supabase_env(monkeypatch):
     monkeypatch.setattr(config, "SUPABASE_SERVICE_KEY", None)
     monkeypatch.setattr(config, "SUPABASE_JWT_SECRET", None)
     monkeypatch.setattr(config, "SUPABASE_JWKS_URL", None)
+    monkeypatch.setattr(config, "EXT_SYNC_SECRET", "dev-ext-sync-secret")
     monkeypatch.setattr(config, "ADMIN_TOKEN", "admin-dev")
     # Ensure a stash of a previous JWT client isn't reused across tests.
     import app.deps as deps

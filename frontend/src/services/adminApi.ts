@@ -68,6 +68,13 @@ export interface AdminUser {
   updated_at: string | null
 }
 
+export interface PaginatedUsers {
+  users: AdminUser[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 export interface AdminSettings {
   payment?: Record<string, unknown>
   quotas?: Record<string, unknown>
@@ -89,6 +96,13 @@ export interface AuditLogRow {
   created_at: string | null
 }
 
+export interface PaginatedAudit {
+  logs: AuditLogRow[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 export interface Kpis {
   totalUsers: number
   proUsers: number
@@ -104,8 +118,14 @@ export function hasAdminToken(): boolean {
   return Boolean(sessionStorage.getItem(TOKEN_KEY))
 }
 
-export const listUsers = (search?: string, role?: string) =>
-  get<{ users: AdminUser[] }>(`/api/admin/users?limit=100${search ? `&search=${encodeURIComponent(search)}` : ''}${role ? `&role=${role}` : ''}`)
+export const listUsers = (opts: { search?: string; role?: string; page?: number; pageSize?: number } = {}) => {
+  const params = new URLSearchParams()
+  if (opts.search) params.set('search', opts.search)
+  if (opts.role) params.set('role', opts.role)
+  params.set('page', String(opts.page ?? 1))
+  params.set('page_size', String(opts.pageSize ?? 25))
+  return get<PaginatedUsers>(`/api/admin/users?${params.toString()}`)
+}
 
 export const setUserPlan = (userId: string, plan: string, months?: number) =>
   post<{ ok: boolean; plan_expires_at?: string }>(
@@ -119,6 +139,9 @@ export const setUserBan = (userId: string, banned: boolean, reason?: string) =>
 export const deleteUser = (userId: string) =>
   post<{ ok: boolean }>(`/api/admin/users/${userId}/delete`)
 
+export const bulkDeleteUsers = (ids: string[]) =>
+  post<{ ok: boolean; deleted: number }>('/api/admin/users/bulk-delete', { ids })
+
 export const getSettings = () => get<{ settings: AdminSettings }>('/api/admin/settings')
 
 export const updateSettings = (patch: AdminSettings) =>
@@ -126,5 +149,5 @@ export const updateSettings = (patch: AdminSettings) =>
 
 export const getKpis = () => get<{ kpis: Kpis }>('/api/admin/kpis')
 
-export const getAuditLog = (limit = 50) =>
-  get<{ logs: AuditLogRow[] }>(`/api/admin/audit?limit=${limit}`)
+export const getAuditLog = (page = 1, pageSize = 25) =>
+  get<PaginatedAudit>(`/api/admin/audit?page=${page}&page_size=${pageSize}`)

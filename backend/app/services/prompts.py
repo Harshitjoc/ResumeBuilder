@@ -7,6 +7,8 @@ skills, dates, degrees, or metrics.
 import json
 from typing import Any
 
+from app.services.knowledge import claim_index
+
 SORT = "SORT"
 
 VALID_TARGET_USERS = ("recent-grad", "working-professional", "career-switcher")
@@ -138,7 +140,34 @@ Base the assessment ONLY on what is in the resume. overall_score is 0-100.
 """, target_user)
 
 
-def customize_prompt(resume: dict, job: dict, compatibility: dict, target_user: str | None = None) -> str:
+def _evidence_block(evidence: Any) -> str:
+    items = evidence or []
+    if not items:
+        return (
+            "EVIDENCE LEDGER (EMPTY — nomina cum persona, nulla inventio):\n"
+            "The candidate has no confirmed proof items. Rephrase and reorganize "
+            "ONLY what the resume states. NEVER introduce numbers, percentages, "
+            "or impact claims they did not write — if a metric appears nowhere in "
+            "the resume, do not invent or imply one."
+        )
+    return "EVIDENCE LEDGER (proof items the candidate has confirmed):\n" + json.dumps(
+        [{"category": _as_e(it, "category"), "text": _as_e(it, "text")} for it in items],
+        indent=2,
+        default=str,
+    )
+
+
+def _as_e(obj: Any, key: str) -> Any:
+    return obj.get(key) if isinstance(obj, dict) else None
+
+
+def customize_prompt(
+    resume: dict,
+    job: dict,
+    compatibility: dict,
+    target_user: str | None = None,
+    evidence: list | None = None,
+) -> str:
     return _append_persona(f"""
 You are an expert resume optimizer. Customize the candidate's resume for the target
 job while maintaining ABSOLUTE authenticity.
@@ -152,6 +181,11 @@ SAFETY RULES (NON-NEGOTIABLE - NEVER BREAK):
 6. CAN rephrase bullets to match job language (truthful only).
 7. CAN reorder skills or sections.
 8. CAN suggest keyword additions only if they naturally fit the candidate's real experience.
+9. EVIDENCE HARD GATE: any rephrased or added bullet that makes a quantitative
+   or impact claim (numbers, %, metrics) MUST be assembled from the EVIDENCE
+   LEDGER below. Do not invent or imply metrics that appear neither in the
+   resume nor the ledger. When a change would need a metric the candidate has
+   not proven, set "is_authentic": false and "confidence": "low" instead.
 
 CANDIDATE MASTER RESUME (JSON):
 {_dump(resume)}
@@ -161,6 +195,8 @@ PARSED JOB (JSON):
 
 COMPATIBILITY ANALYSIS (JSON):
 {_dump(compatibility)}
+
+{_evidence_block(evidence)}
 
 Return a JSON object with EXACTLY this shape:
 {{
@@ -197,6 +233,92 @@ Return a JSON object with EXACTLY this shape:
   "ready_for_verification": true
 }}
 
+Empty arrays are preferred over omitting fields.
+""", target_user)
+
+
+def redesign_resume_prompt(
+    resume: dict,
+    job: dict,
+    compatibility: dict,
+    target_user: str | None = None,
+    evidence: list | None = None,
+) -> str:
+    return _append_persona(f"""
+You are an expert ATS resume strategist. Your job is to RESTRUCTURE the candidate's
+resume to maximize ATS pass-through and recruiter readability for the target job.
+
+This is a STRUCTURAL redesign — you reorganize what exists, you do NOT invent new content.
+
+SAFETY RULES (NON-NEGOTIABLE - NEVER BREAK):
+1. NEVER invent work experience, projects, or skills not in the master resume.
+2. NEVER change employment dates, graduation dates, or years of experience.
+3. NEVER change degree levels or school names.
+4. NEVER modify metrics/numbers.
+5. ONLY reorder, restructure, and rephrase existing content.
+6. EVIDENCE HARD GATE: any rephrased bullet that makes a quantitative or impact
+   claim MUST be assembled from the EVIDENCE LEDGER below. Never invent or imply
+   metrics not proven in the resume or ledger; mark such changes
+   "is_authentic": false, "confidence": "low" instead.
+
+REDESIGN ACTIONS YOU MAY TAKE:
+1. REORDER SECTIONS — put the most relevant sections first (e.g., for a data role, Skills and Projects before Education).
+2. REORDER SKILLS — matching/required skills first, then related skills, then other skills.
+3. REORDER EXPERIENCE BULLETS — most relevant bullets first within each role.
+4. REORDER PROJECTS — most relevant projects first.
+5. REPHRASE BULLETS — match the job's language and keywords where truthful.
+6. SUGGEST KEYWORD ADDITIONS — only if they naturally fit the candidate's real experience.
+7. FLAG STRUCTURAL ISSUES — missing sections, empty sections, ATS-parseability problems.
+
+CANDIDATE MASTER RESUME (JSON):
+{_dump(resume)}
+
+PARSED JOB (JSON):
+{_dump(job)}
+
+COMPATIBILITY ANALYSIS (JSON):
+{_dump(compatibility)}
+
+{_evidence_block(evidence)}
+
+Return a JSON object with EXACTLY this shape:
+{{
+  "customizations": [
+    {{
+      "section": "work_experience",
+      "entry_index": 0,
+      "change_type": "bullet_reorder_and_rephrase",
+      "change_severity": "low|medium|high",
+      "original": "...",
+      "customized": "...",
+      "reason": "...",
+      "confidence": "high|medium|low",
+      "is_authentic": true,
+      "explanation": "..."
+    }}
+  ],
+  "section_recommendations": {{
+    "include": ["..."],
+    "exclude": ["..."],
+    "reason": "..."
+  }},
+  "keyword_suggestions": [
+    {{
+      "keyword": "...",
+      "location": "...",
+      "suggested_text": "...",
+      "confidence": "high|medium|low",
+      "is_authentic": true
+    }}
+  ],
+  "compatibility_concerns": [],
+  "customization_summary": "...",
+  "ready_for_verification": true
+}}
+
+Each customization MUST have section, change_type, original, customized, and reason.
+section values: "summary", "skills", "work_experience", "education", "projects", "certifications", "notes"
+change_type values: "section_reorder", "bullet_reorder", "bullet_rephrase", "keyword_insert", "section_remove", "rephrase"
 Empty arrays are preferred over omitting fields.
 """, target_user)
 
@@ -239,10 +361,15 @@ Return a JSON object with EXACTLY these keys:
   "certifications": [
     {{"name": "", "issuer": "", "date": ""}}
   ],
+  "notes": "",
   "template": "classic"
 }}
 
 Empty arrays/strings are preferred over omitting fields.
+NOTES (NON-NEGOTIABLE): Put any free-text section not covered by the keys above
+(e.g., "Additional Information", "Interests & Hobbies", "Awards & Honors",
+"Languages", "Volunteer Work") into the "notes" string, copied as-is. Leave it
+empty if no such section exists.
 """, target_user)
 
 
@@ -384,7 +511,40 @@ Return a JSON object with a single field "letter" containing the letter text.
 """, target_user)
 
 
-def interview_prep_prompt(resume: dict, job: dict, target_user: str | None = None) -> str:
+def interview_prep_prompt(
+    resume: dict,
+    job: dict,
+    target_user: str | None = None,
+    focus_keywords: list[str] | None = None,
+    evidence: list[dict] | None = None,
+    confirmed_claims: list[dict] | None = None,
+) -> str:
+    focus_block = ""
+    if focus_keywords:
+        focus_block = f"""
+FOCUS: The candidate is interviewing around these specific gap keywords:
+{_dump(focus_keywords)}
+
+Bias likely_questions and talking_points toward these keywords, but ONLY where
+the resume or evidence actually contains them; if a focus keyword is absent
+from the resume, list one honest preparation question and mark it
+"(needs practice)" rather than inventing a claim.
+"""
+    truth_block = ""
+    if evidence or confirmed_claims:
+        truth_block = f"""
+TRUTH LAYER: a deterministic index of the candidate's claims with verification
+verdicts and attached proof (where it exists):
+{_dump(claim_index(resume, evidence, confirmed_claims))}
+
+- Claim competence ONLY where a claim exists in the index.
+- verdict "verified"/"confirmed" → the point may be "proof-backed"; include the
+  evidenceText as proof.
+- resume claim present with no proof → "in-resume".
+- topic merely gestured at → "needs-research" with one concrete research step.
+- Never invent facts, evidence, or metrics. These statuses are honesty labels,
+  not permission to expand what is written.
+"""
     return _append_persona(f"""
 You are an interview coach. Build a personalized interview-prep pack for the
 candidate and the job below.
@@ -393,7 +553,7 @@ AUTHENTICITY RULES (NON-NEGOTIABLE):
 1. Questions and talking points MUST be derived ONLY from the resume and job.
    Never invent experience, skills, or metrics.
 2. Every talking point MUST trace to a specific resume line.
-3. If the resume lacks a given area, suggest research rather than inventing facts.
+3. If the resume lacks a given area, suggest research rather than inventing facts.{focus_block}{truth_block}
 
 CANDIDATE RESUME (JSON):
 {_dump(resume)}
@@ -403,11 +563,13 @@ TARGET JOB (JSON):
 
 Return a JSON object with EXACTLY these keys:
 {{
-  "likely_questions": ["..."],
+  "likely_questions": [...],
   "company_research": ["..."],
-  "talking_points": ["..."],
+  "talking_points": [...],
   "questions_to_ask": ["..."]
 }}
 
-Use empty arrays where applicable.
+Each item in likely_questions and talking_points may be a string OR an object
+{{ "text": "...", "section": "experience", "claimId": "claim-3", "status": "proof-backed"|"in-resume"|"needs-research", "proof": "optional evidence text" }}.
+company_research and questions_to_ask are plain strings. Use empty arrays where applicable.
 """, target_user)

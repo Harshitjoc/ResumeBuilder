@@ -38,11 +38,6 @@ export async function signInPassword(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password })
 }
 
-export async function signInAnonymously() {
-  if (!supabase) return { data: null, error: { message: 'Supabase not configured' } as any }
-  return supabase.auth.signInAnonymously()
-}
-
 export async function signOut(scope?: 'global' | 'local' | 'others') {
   if (!supabase) return { error: null }
   return supabase.auth.signOut(scope ? { scope } : undefined)
@@ -63,48 +58,6 @@ export async function getAccessToken(): Promise<string | null> {
   if (!supabase) return null
   const { data } = await supabase.auth.getSession()
   return data.session?.access_token ?? null
-}
-
-export async function linkEmailToAccount(
-  email: string,
-  password: string,
-  fullName?: string,
-) {
-  if (!supabase)
-    return { data: { user: null }, error: { message: 'Supabase not configured' } as any }
-  return supabase.auth.updateUser({
-    email,
-    password,
-    data: fullName ? { full_name: fullName } : undefined,
-  })
-}
-
-export async function claimAnonymousRows(anonToken: string): Promise<Record<string, unknown>> {
-  const token = await getAccessToken()
-  if (!token) throw new Error('Not signed in')
-  const base = import.meta.env.VITE_API_URL || ''
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  }
-  const res = await fetch(`${base}/api/auth/claim-anonymous`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ anon_token: anonToken }),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    let message = text
-    try {
-      const parsed = JSON.parse(text)
-      const detail = parsed?.detail
-      message = typeof detail === 'string' ? detail : detail?.detail ?? text
-    } catch {
-      /* keep raw text */
-    }
-    throw new Error(message || `Claim failed: ${res.status}`)
-  }
-  return res.json() as Promise<Record<string, unknown>>
 }
 
 export function onAuthStateChange(
@@ -128,13 +81,18 @@ export interface ProfileRecord {
   plan: 'free' | 'pro'
   planExpiresAt: string | null
   targetUser: string | null
+  fullName: string | null
+  avatarUrl: string | null
+  phone: string | null
+  location: string | null
+  headline: string | null
 }
 
 export async function getProfile(userId: string): Promise<ProfileRecord | null> {
   if (!supabase) return null
   const { data, error } = await supabase
     .from('profiles')
-    .select('plan, plan_expires_at, target_user')
+    .select('plan, plan_expires_at, target_user, full_name, avatar_url, phone, location, headline')
     .eq('id', userId)
     .maybeSingle()
   if (error || !data) return null
@@ -142,19 +100,49 @@ export async function getProfile(userId: string): Promise<ProfileRecord | null> 
     plan: data.plan === 'pro' ? 'pro' : 'free',
     planExpiresAt: data.plan_expires_at ? String(data.plan_expires_at) : null,
     targetUser: data.target_user ? String(data.target_user) : null,
+    fullName: data.full_name ? String(data.full_name) : null,
+    avatarUrl: data.avatar_url ? String(data.avatar_url) : null,
+    phone: data.phone ? String(data.phone) : null,
+    location: data.location ? String(data.location) : null,
+    headline: data.headline ? String(data.headline) : null,
   }
 }
 
-export async function upsertProfile(
-  userId: string,
-  patch: { plan?: 'free' | 'pro'; targetUser?: string | null },
-): Promise<void> {
+export interface ProfilePatch {
+  plan?: 'free' | 'pro'
+  targetUser?: string | null
+  fullName?: string | null
+  avatarUrl?: string | null
+  phone?: string | null
+  location?: string | null
+  headline?: string | null
+}
+
+export async function upsertProfile(userId: string, patch: ProfilePatch): Promise<void> {
   if (!supabase) return
   const row: Record<string, unknown> = { id: userId }
   if (patch.plan) row.plan = patch.plan
   if (patch.targetUser !== undefined) row.target_user = patch.targetUser
+  if (patch.fullName !== undefined) row.full_name = patch.fullName
+  if (patch.avatarUrl !== undefined) row.avatar_url = patch.avatarUrl
+  if (patch.phone !== undefined) row.phone = patch.phone
+  if (patch.location !== undefined) row.location = patch.location
+  if (patch.headline !== undefined) row.headline = patch.headline
   const { error } = await supabase.from('profiles').upsert(row, { onConflict: 'id' })
   if (error) throw new Error(`Failed to update profile: ${error.message}`)
+}
+
+export async function updateUserProfile(userId: string, fields: Omit<ProfilePatch, 'plan' | 'targetUser'>): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured')
+  const data: Record<string, unknown> = {}
+  if (fields.fullName !== undefined) data.full_name = fields.fullName
+  if (fields.avatarUrl !== undefined) data.avatar_url = fields.avatarUrl
+  if (fields.phone !== undefined) data.phone = fields.phone
+  if (fields.location !== undefined) data.location = fields.location
+  if (fields.headline !== undefined) data.headline = fields.headline
+  const { error } = await supabase.auth.updateUser({ data })
+  if (error) throw new Error(error.message)
+  await upsertProfile(userId, fields).catch(() => {})
 }
 
 // ---------------------------------------------------------------------------

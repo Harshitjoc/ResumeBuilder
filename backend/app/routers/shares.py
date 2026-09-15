@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app import config
-from app.services.entitlements import get_plan, is_pro
+from app.services.entitlements import feature_enabled, get_plan, is_pro
 
 router = APIRouter(prefix="/api/shares", tags=["shares"])
 
@@ -42,6 +42,9 @@ class ShareCreate(BaseModel):
     name: str
     atsScore: int | None = None
     resume: dict[str, Any]
+    evidence: list[dict[str, Any]] | None = None
+    heuristicAts: bool | None = None
+    ref: str | None = None
 
 
 @router.post("/")
@@ -50,6 +53,8 @@ async def create_share(
     x_client_key: str | None = Header(None),
     x_user_id: str | None = Header(None),
 ):
+    if not feature_enabled("public_shares"):
+        raise HTTPException(status_code=503, detail="Public share links are currently disabled by the admin")
     identity = x_client_key or ""
     plan = get_plan(identity, x_user_id)
     if not is_pro(plan, x_user_id, identity_key=identity):
@@ -57,6 +62,8 @@ async def create_share(
 
     slug = secrets.token_urlsafe(8)
     now = datetime.now(timezone.utc).isoformat()
+    evidence = body.evidence or []
+    referrer = (body.ref or "").strip()[:64] or None
 
     sb = _supabase_client()
     if sb:
@@ -67,8 +74,11 @@ async def create_share(
                 "name": body.name,
                 "resume_snapshot": body.resume,
                 "ats_score": body.atsScore,
+                "evidence": evidence,
+                "heuristic_ats": body.heuristicAts is True,
+                "referrer": referrer,
             }).execute()
-            return {"slug": slug, "name": body.name, "atsScore": body.atsScore, "createdAt": now}
+            return {"slug": slug, "name": body.name, "atsScore": body.atsScore, "evidence": evidence, "createdAt": now, "heuristicAts": body.heuristicAts, "ref": body.ref}
         except Exception:
             pass
 
@@ -79,11 +89,14 @@ async def create_share(
             "name": body.name,
             "atsScore": body.atsScore,
             "resume": body.resume,
+            "evidence": evidence,
             "createdAt": now,
+            "heuristicAts": body.heuristicAts,
+            "ref": referrer,
         }
         _write_shares(shares)
 
-    return {"slug": slug, "name": body.name, "atsScore": body.atsScore, "createdAt": now}
+    return {"slug": slug, "name": body.name, "atsScore": body.atsScore, "evidence": evidence, "createdAt": now, "heuristicAts": body.heuristicAts, "ref": body.ref}
 
 
 @router.get("/{slug}")
@@ -91,7 +104,7 @@ async def get_share(slug: str):
     sb = _supabase_client()
     if sb:
         try:
-            res = sb.table("shares").select("name,created_at,ats_score,resume_snapshot").eq("slug", slug).limit(1).execute()
+            res = sb.table("shares").select("name,created_at,ats_score,resume_snapshot,evidence,heuristic_ats,referrer").eq("slug", slug).limit(1).execute()
             if res.data:
                 r = res.data[0]
                 return {
@@ -99,6 +112,9 @@ async def get_share(slug: str):
                     "createdAt": r["created_at"],
                     "atsScore": r.get("ats_score"),
                     "resume": r.get("resume_snapshot"),
+                    "evidence": r.get("evidence") or [],
+                    "heuristicAts": r.get("heuristic_ats"),
+                    "ref": r.get("referrer"),
                 }
         except Exception:
             pass
@@ -112,6 +128,9 @@ async def get_share(slug: str):
         "createdAt": entry["createdAt"],
         "atsScore": entry.get("atsScore"),
         "resume": entry.get("resume"),
+        "evidence": entry.get("evidence") or [],
+        "heuristicAts": entry.get("heuristicAts"),
+        "ref": entry.get("ref"),
     }
 
 

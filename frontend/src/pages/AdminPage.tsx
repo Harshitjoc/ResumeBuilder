@@ -13,6 +13,8 @@ import {
   XCircle,
   Ban,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { isSupabaseConfigured } from '@/services/supabase'
@@ -21,14 +23,16 @@ import {
   setUserPlan,
   setUserBan,
   deleteUser,
+  bulkDeleteUsers,
   getSettings,
   updateSettings,
   getKpis,
   getAuditLog,
   setAdminToken,
   type AdminSettings,
-  type AuditLogRow,
   type Kpis,
+  type PaginatedUsers,
+  type PaginatedAudit,
 } from '@/services/adminApi'
 import {
   listPaymentRequests,
@@ -210,12 +214,23 @@ function OverviewTab({ onError }: { onError: (s: string) => void }) {
 function UsersTab({ onError }: { onError: (s: string) => void }) {
   const [query, setQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [acting, setActing] = useState<string | null>(null)
-  const { data, loading, error, load } = useLoad(() => listUsers(query || undefined, roleFilter || undefined))
+  const [bulkBusy, setBulkBusy] = useState(false)
+
+  const pageSize = 25
+
+  const { data, loading, error, load } = useLoad<PaginatedUsers>(() =>
+    listUsers({ search: query || undefined, role: roleFilter || undefined, page, pageSize }),
+  )
 
   useEffect(() => {
     load()
-  }, [load])
+  }, [load, page])
+
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const run = async (fn: () => Promise<unknown>) => {
     setActing('busy')
@@ -228,6 +243,42 @@ function UsersTab({ onError }: { onError: (s: string) => void }) {
       setActing(null)
     }
   }
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    const users = data?.users ?? []
+    if (selected.size === users.length) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(users.map((u) => u.id)))
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return
+    if (!window.confirm(`Delete ${selected.size} user(s)? This cannot be undone.`)) return
+    setBulkBusy(true)
+    try {
+      await bulkDeleteUsers(Array.from(selected))
+      setSelected(new Set())
+      await load()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Bulk delete failed')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  const users = data?.users ?? []
+  const allSelected = users.length > 0 && selected.size === users.length
 
   return (
     <div className="space-y-4">
@@ -249,13 +300,26 @@ function UsersTab({ onError }: { onError: (s: string) => void }) {
           <option value="banned">Banned</option>
         </select>
         <button
-          onClick={load}
+          onClick={() => {
+            setPage(1)
+            load()
+          }}
           disabled={loading}
           className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Search
         </button>
+        {selected.size > 0 && (
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkBusy}
+            className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+          >
+            {bulkBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Delete {selected.size} selected
+          </button>
+        )}
       </div>
 
       {errorNote(error)}
@@ -264,6 +328,14 @@ function UsersTab({ onError }: { onError: (s: string) => void }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+              <th className="px-4 py-3 w-10">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  className="rounded border-slate-300"
+                />
+              </th>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Role</th>
               <th className="px-4 py-3">Plan</th>
@@ -273,8 +345,18 @@ function UsersTab({ onError }: { onError: (s: string) => void }) {
             </tr>
           </thead>
           <tbody>
-            {(data?.users ?? []).map((u) => (
+            {users.map((u) => (
               <tr key={u.id} className="border-b border-slate-100 last:border-0">
+                <td className="px-4 py-3">
+                  {u.role !== 'admin' && (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(u.id)}
+                      onChange={() => toggleSelect(u.id)}
+                      className="rounded border-slate-300"
+                    />
+                  )}
+                </td>
                 <td className="px-4 py-3 font-medium text-slate-900">{u.full_name || '—'}</td>
                 <td className="px-4 py-3">
                   <span
@@ -321,24 +403,26 @@ function UsersTab({ onError }: { onError: (s: string) => void }) {
                         <Ban className="h-4 w-4" />
                       </button>
                     )}
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Delete user ${u.full_name || u.id}? This cannot be undone.`))
-                          run(() => deleteUser(u.id))
-                      }}
-                      disabled={acting === u.id}
-                      title="Delete"
-                      className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {u.role !== 'admin' && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Delete user ${u.full_name || u.id}? This cannot be undone.`))
+                            run(() => deleteUser(u.id))
+                        }}
+                        disabled={acting === u.id}
+                        title="Delete"
+                        className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
             ))}
-            {(data?.users?.length ?? 0) === 0 && (
+            {users.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-slate-400">
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
                   No users found.
                 </td>
               </tr>
@@ -346,6 +430,28 @@ function UsersTab({ onError }: { onError: (s: string) => void }) {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <span>{total} total · page {page} of {totalPages}</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="rounded-lg border border-slate-300 p-1 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className="rounded-lg border border-slate-300 p-1 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -492,6 +598,13 @@ function PaymentsTab({ adminMode, onError }: { adminMode: boolean; onError: (s: 
   )
 }
 
+const FEATURE_FLAGS: Array<{ key: string; label: string; description: string }> = [
+  { key: 'cover_letters', label: 'Cover letter generation', description: 'AI-written cover letter endpoint (Pro feature). Disable to take it offline for maintenance.' },
+  { key: 'interview_prep', label: 'Interview prep pack', description: 'Questions + talking points endpoint (Pro feature). Disable to take it offline for maintenance.' },
+  { key: 'public_shares', label: 'Public resume shares', description: 'Hosted share links with ATS score badge (Pro feature). Disable to take it offline for maintenance.' },
+  { key: 'application_tracker', label: 'Application tracker', description: 'Track submitted applications in the dashboard and via the Chrome extension (Pro feature). Disable to hide the tab for everyone.' },
+]
+
 function SettingsTab({ onError }: { onError: (s: string) => void }) {
   const [form, setForm] = useState<AdminSettings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -532,47 +645,70 @@ function SettingsTab({ onError }: { onError: (s: string) => void }) {
 
   if (loading && !form) return <p className="text-sm text-slate-400">Loading settings...</p>
 
-  const sections: Array<[keyof AdminSettings, string]> = [
-    ['payment', 'Payment'],
-    ['quotas', 'Quotas & limits'],
-    ['features', 'Feature flags'],
-    ['brand', 'Branding'],
+  const sections: Array<[keyof AdminSettings, string, string | null]> = [
+    ['payment', 'Payment', 'UPI details for the manual UTR payment flow shown on /upgrade.'],
+    ['quotas', 'Quotas & limits', 'Controls daily free-tier usage caps and upload size limits.'],
+    ['features', 'Feature flags', 'Global kill-switches that disable a feature for everyone (admin and users) when toggled off. Use for maintenance or abuse control.'],
+    ['brand', 'Branding', 'Product name and display branding.'],
   ]
+
+  const paymentFields = ['upi_id', 'upi_payee_name', 'payment_amount', 'currency', 'subscription_months']
+  const quotaFields = ['free_daily_llm', 'max_upload_mb']
 
   return (
     <div className="space-y-4">
-      {sections.map(([section, label]) => {
+      {sections.map(([section, label, description]) => {
         const data = (form?.[section] as Record<string, unknown> | undefined) ?? {}
-        const fields = section === 'payment'
-          ? ['upi_id', 'upi_payee_name', 'payment_amount', 'currency', 'subscription_months']
-          : section === 'quotas'
-            ? ['free_daily_llm', 'max_upload_mb']
-            : section === 'features'
-              ? ['public_shares', 'cover_letters', 'interview_prep', 'application_tracker']
-              : ['product_name']
+        const isFeatures = section === 'features'
         return (
           <div key={section} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="mb-3 text-sm font-semibold text-slate-700">{label}</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {fields.map((key) => (
-                <label key={key} className="block text-xs text-slate-500">
-                  {key}
-                  <input
-                    value={String(data[key] ?? '')}
-                    onChange={(e) =>
-                      setNested(
-                        section,
-                        key,
-                        /^(payment_amount|subscription_months|free_daily_llm|max_upload_mb)$/.test(key)
-                          ? Number(e.target.value) || 0
-                          : e.target.value,
-                      )
-                    }
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
-                  />
-                </label>
-              ))}
-            </div>
+            <h3 className="text-sm font-semibold text-slate-700">{label}</h3>
+            {description && <p className="mt-1 text-xs text-slate-400">{description}</p>}
+
+            {isFeatures ? (
+              <div className="mt-3 space-y-3">
+                {FEATURE_FLAGS.map(({ key, label: flagLabel, description: desc }) => (
+                  <label key={key} className="flex items-start gap-3 rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={data[key] !== false}
+                      onChange={(e) => setNested('features', key, e.target.checked)}
+                      className="mt-0.5 rounded border-slate-300"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">{flagLabel}</p>
+                      <p className="text-xs text-slate-400">{desc}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {(section === 'payment'
+                  ? paymentFields
+                  : section === 'quotas'
+                    ? quotaFields
+                    : ['product_name']
+                ).map((key) => (
+                  <label key={key} className="block text-xs text-slate-500">
+                    {key}
+                    <input
+                      value={String(data[key] ?? '')}
+                      onChange={(e) =>
+                        setNested(
+                          section,
+                          key,
+                          /^(payment_amount|subscription_months|free_daily_llm|max_upload_mb)$/.test(key)
+                            ? Number(e.target.value) || 0
+                            : e.target.value,
+                        )
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         )
       })}
@@ -592,10 +728,15 @@ function SettingsTab({ onError }: { onError: (s: string) => void }) {
 }
 
 function AuditTab() {
-  const { data, loading, load } = useLoad<{ logs: AuditLogRow[] }>(() => getAuditLog(100))
+  const [page, setPage] = useState(1)
+  const { data, loading, load } = useLoad<PaginatedAudit>(() => getAuditLog(page))
   useEffect(() => {
     load()
-  }, [load])
+  }, [load, page])
+
+  const logs = data?.logs ?? []
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / (data?.pageSize ?? 25)))
 
   return (
     <div className="space-y-3">
@@ -622,7 +763,7 @@ function AuditTab() {
             </tr>
           </thead>
           <tbody>
-            {(data?.logs ?? []).map((row) => (
+            {logs.map((row) => (
               <tr key={row.id} className="border-b border-slate-100 last:border-0">
                 <td className="px-4 py-3 whitespace-nowrap text-slate-500">
                   {row.created_at ? new Date(row.created_at).toLocaleString() : '—'}
@@ -633,7 +774,7 @@ function AuditTab() {
                 <td className="px-4 py-3 text-slate-500">{row.reason ?? '—'}</td>
               </tr>
             ))}
-            {(data?.logs?.length ?? 0) === 0 && (
+            {logs.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
                   No audit entries yet.
@@ -643,6 +784,27 @@ function AuditTab() {
           </tbody>
         </table>
       </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <span>{total} total · page {page} of {totalPages}</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="rounded-lg border border-slate-300 p-1 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className="rounded-lg border border-slate-300 p-1 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -11,10 +11,12 @@ import VerificationPage from '@/pages/VerificationPage'
 import PreviewPage from '@/pages/PreviewPage'
 import ApplicationsPage from '@/pages/ApplicationsPage'
 import SharePage from '@/pages/SharePage'
+import BackupPage from '@/pages/BackupPage'
 import UpgradePage from '@/pages/UpgradePage'
 import AdminPage from '@/pages/AdminPage'
 import AccountPage from '@/pages/AccountPage'
 import LoginPage from '@/pages/LoginPage'
+import NotFoundPage from '@/pages/NotFoundPage'
 
 export default function App() {
   return (
@@ -38,9 +40,11 @@ export default function App() {
             }
           />
           <Route path="/share/:slug" element={<SharePage />} />
+          <Route path="/backup" element={<BackupPage />} />
           <Route path="/upgrade" element={<UpgradePage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/account" element={<AccountPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
     </ErrorBoundary>

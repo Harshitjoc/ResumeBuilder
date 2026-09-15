@@ -67,7 +67,52 @@ def get_plan(identity_key: str, user_id: str | None = None) -> str:
         return plan or "free"
 
 
+def is_admin_user(user_id: str | None) -> bool:
+    """True when the signed-in user holds the admin role in Supabase profiles.
+
+    File-store mode has no roles, so this returns False there.
+    """
+    if not user_id:
+        return False
+    sb = _supabase_client()
+    if not sb:
+        return False
+    try:
+        res = sb.table("profiles").select("role").eq("id", user_id).limit(1).execute()
+        return bool(res.data) and res.data[0].get("role") == "admin"
+    except Exception:
+        return False
+
+
+def get_feature_flags() -> dict[str, Any]:
+    """Reads the admin-controlled `features` settings block (global kill switches).
+
+    Keys absent from the settings row fall back to enabled (True).
+    """
+    sb = _supabase_client()
+    if sb:
+        try:
+            res = sb.table("system_settings").select("value").eq("key", "features").limit(1).execute()
+            if res.data:
+                value = res.data[0].get("value") or {}
+                if isinstance(value, dict):
+                    return dict(value)
+        except Exception:
+            pass
+    return {}
+
+
+def feature_enabled(feature: str, default: bool = True) -> bool:
+    """Global feature toggle. When explicitly False the feature is disabled for
+    everyone (maintenance / abuse-control switch), regardless of plan.
+    """
+    value = get_feature_flags().get(feature, default)
+    return bool(value)
+
+
 def is_pro(plan: str, user_id: str | None, identity_key: str | None = None, now: datetime | None = None) -> bool:
+    if is_admin_user(user_id):
+        return True
     if plan != "pro":
         return False
     now = now or datetime.now(timezone.utc)
@@ -121,6 +166,8 @@ def check_and_increment(
     if config.ENABLE_ENTITLEMENTS == "false":
         return {"allowed": True, "remaining": None, "limit": None}
     if not identity_key:
+        return {"allowed": True, "remaining": None, "limit": None}
+    if is_admin_user(user_id):
         return {"allowed": True, "remaining": None, "limit": None}
 
     plan = get_plan(user_id or identity_key, user_id)
@@ -186,6 +233,14 @@ def set_plan(
 
 
 def get_cached(user_id: str | None, identity_key: str | None = None) -> dict[str, Any]:
+    if is_admin_user(user_id):
+        return {
+            "plan": "pro",
+            "planExpiresAt": None,
+            "quotaRemaining": None,
+            "quotaLimit": None,
+            "quotaUnlimited": True,
+        }
     key = user_id or identity_key or ""
     plan = get_plan(key, user_id)
     is_p = is_pro(plan, user_id, identity_key=identity_key)

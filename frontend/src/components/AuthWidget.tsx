@@ -19,7 +19,7 @@ export default function AuthWidget() {
   }
 
   if (sessionStatus === 'loading') {
-    return <span className="text-xs text-slate-400">Loading...</span>
+    return <span className="eyebrow">Loading…</span>
   }
 
   if (sessionUser) {
@@ -30,14 +30,14 @@ export default function AuthWidget() {
     }
 
     return (
-      <div className="flex items-center gap-3">
-        <span className="flex items-center gap-1.5 text-xs text-green-600">
-          <Cloud className="h-3.5 w-3.5" />
+      <div className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 font-mono text-[11px] text-emerald-700">
+          <Cloud className="h-3 w-3" />
           {sessionUser.email ?? 'Anonymous'}
         </span>
         <button
           onClick={handleSignOut}
-          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
+          className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
         >
           <LogOut className="h-3 w-3" />
           Sign out
@@ -49,7 +49,7 @@ export default function AuthWidget() {
   return (
     <Link
       to="/login"
-      className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700"
+      className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
     >
       Sign in
     </Link>

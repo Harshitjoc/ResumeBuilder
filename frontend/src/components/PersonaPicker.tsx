@@ -58,15 +58,27 @@ export function PersonaPicker({ compact }: { compact?: boolean }) {
           <button
             key={p.key}
             onClick={() => setTargetUser(active ? null : p.key)}
-            className={`rounded-2xl border-2 p-5 text-left transition ${
+            className={`sheet relative overflow-hidden p-5 text-left transition ${
               active
-                ? 'border-slate-900 bg-slate-900 text-white'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                ? 'border-blue-600 bg-blue-50/60'
+                : 'hover:border-blue-300'
             }`}
           >
-            <Icon className={`mb-2 h-6 w-6 ${active ? 'text-white' : 'text-slate-500'}`} />
-            <p className="text-sm font-semibold">{p.label}</p>
-            <p className={`mt-1 text-xs ${active ? 'text-slate-200' : 'text-slate-500'}`}>
+            <span
+              className={`absolute inset-x-0 top-0 h-0.5 ${
+                active ? 'bg-blue-600' : 'bg-transparent'
+              }`}
+            />
+            <div className="mb-3 flex items-center justify-between">
+              <Icon className={`h-6 w-6 ${active ? 'text-blue-700' : 'text-slate-500'}`} />
+              {active && (
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-600" />
+              )}
+            </div>
+            <p className={`text-sm font-semibold ${active ? 'text-blue-900' : 'text-slate-900'}`}>
+              {p.label}
+            </p>
+            <p className={`mt-1 text-xs leading-relaxed ${active ? 'text-blue-800/70' : 'text-slate-500'}`}>
               {p.desc}
             </p>
           </button>

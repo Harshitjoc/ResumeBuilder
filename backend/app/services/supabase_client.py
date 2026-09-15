@@ -41,8 +41,10 @@ class _Builder:
         self._payload: Any = None
         self._on_conflict: str | None = None
         self._filters: list[tuple[str, str]] = []
+        self._filters_or: list[str] = []
         self._order: list[tuple[str, bool]] = []
         self._limit: int | None = None
+        self._offset: int | None = None
 
     def select(self, columns: str = "*", count: str | None = None) -> "_Builder":
         self._verb = "select"
@@ -62,6 +64,7 @@ class _Builder:
 
     def delete(self) -> "_Builder":
         self._verb = "delete"
+        self._payload = None
         return self
 
     def upsert(self, data: Any, on_conflict: str | None = None) -> "_Builder":
@@ -74,8 +77,20 @@ class _Builder:
         self._filters.append((column, str(value)))
         return self
 
+    def in_(self, column: str, values: list[Any]) -> "_Builder":
+        self._filters.append((column, "in.(" + ",".join(str(v) for v in values) + ")"))
+        return self
+
+    def or_(self, query_str: str) -> "_Builder":
+        self._filters_or.append(query_str)
+        return self
+
     def limit(self, n: int) -> "_Builder":
         self._limit = n
+        return self
+
+    def offset(self, n: int) -> "_Builder":
+        self._offset = n
         return self
 
     def order(self, column: str, desc: bool = False) -> "_Builder":
@@ -103,11 +118,15 @@ class _RestClient:
     def _request(self, b: _Builder) -> _Result:
         params, qsep = [], "?"
         for col, val in b._filters:
-            params.append(f"{col}=eq.{val}")
+            params.append(f"{col}=eq.{val}" if not val.startswith("in.") else f"{col}={val}")
+        for query_str in b._filters_or:
+            params.append(f"or=({query_str})")
         for col, desc in b._order:
             params.append(f"order={col}.{'desc' if desc else 'asc'}")
         if b._verb == "select" and b._limit is not None:
             params.append(f"limit={b._limit}")
+        if b._verb == "select" and b._offset is not None:
+            params.append(f"offset={b._offset}")
         if b._verb == "upsert" and b._on_conflict:
             params.append(f"on_conflict={b._on_conflict}")
         qs = ("?" + "&".join(params)) if params else ""

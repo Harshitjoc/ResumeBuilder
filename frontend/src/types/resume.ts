@@ -39,6 +39,15 @@ export interface Certification {
   date: string
 }
 
+export type TemplateId = 'classic' | 'modern' | 'minimal' | 'bold' | 'professional'
+
+export interface SavedTemplate {
+  id: string
+  name: string
+  createdAt: string
+  resume: ResumeData
+}
+
 export interface ResumeData {
   id?: string
   contact: ContactInfo
@@ -48,7 +57,8 @@ export interface ResumeData {
   education: Education[]
   projects: Project[]
   certifications: Certification[]
-  template: 'classic' | 'modern'
+  notes: string
+  template: TemplateId
 }
 
 export type TargetUser = 'recent-grad' | 'working-professional' | 'career-switcher'
@@ -59,9 +69,43 @@ export interface EvidenceItem {
   text: string
   confidence: 'high' | 'medium' | 'low'
   source: 'document' | 'user'
+  createdAt?: string
+}
+
+export type ClaimVerdict = 'verified' | 'confirmed' | 'unverifiable' | 'ai-drafted'
+
+export interface ClaimRecord {
+  id: string
+  text: string
+  section?: string
+  verdict: ClaimVerdict
+  evidenceId?: string
+  resolvedAt: string
+}
+
+export interface VerifiabilityResult {
+  total: number
+  verified: number
+  unverifiable: number
+  neutral: number
+  ai_drafted: number
+  honesty_score: number
+  flagged: Array<{ section: string; text: string; reason?: string }>
 }
 
 export type ApplicationStatus = 'saved' | 'applied' | 'interview' | 'offer' | 'rejected'
+
+export type ApplicationSource = 'customize' | 'tracker-form' | 'extension'
+
+export type KeywordSource = 'required' | 'preferred' | 'ats'
+
+export interface KeywordEntry {
+  keyword: string
+  inResume: boolean
+  addedByCustomization: boolean
+  inVault: boolean
+  source: KeywordSource
+}
 
 export interface ApplicationRecord {
   id: string
@@ -69,8 +113,16 @@ export interface ApplicationRecord {
   company: string
   status: ApplicationStatus
   appliedAt: string
+  decayed?: boolean
   jobUrl: string
   notes: string
+  resumeVariant?: ResumeData
+  atsScore?: number | null
+  genuineScore?: number | null
+  keywordLedger?: KeywordEntry[]
+  keywordGaps?: string[]
+  jobSource?: ApplicationSource
+  atsSnapshot?: AtsCheck | null
 }
 
 export interface AtsCheck {
@@ -84,15 +136,29 @@ export interface AtsCheck {
   action_items: string[]
 }
 
+export type TruthStatus = 'proof-backed' | 'in-resume' | 'needs-research'
+
+export interface TruthPoint {
+  text: string
+  section?: string | null
+  claimId?: string | null
+  status: TruthStatus
+  proof?: string | null
+  kind?: 'question' | 'talking-point'
+}
+
 export interface InterviewPrep {
   likely_questions: string[]
   company_research: string[]
   talking_points: string[]
   questions_to_ask: string[]
+  truth_points?: TruthPoint[]
 }
 
-export interface CoverLetterResult {
-  letter: string
+export interface TruthSummary {
+  proofBacked: number
+  inResume: number
+  needsResearch: number
 }
 
 export interface ShareRecord {
@@ -102,6 +168,12 @@ export interface ShareRecord {
   name: string
   resume: ResumeData
   atsScore: number | null
+  evidence?: EvidenceItem[]
+  heuristicAts?: boolean | null
+}
+
+export interface CoverLetterResult {
+  letter: string
 }
 
 export interface ContactConfidence {
@@ -127,9 +199,11 @@ export interface VerificationChange {
   customized: string
   reason: string
   severity: 'low' | 'medium' | 'high'
-  action: 'approved' | 'rejected' | 'edited' | 'pending'
+  action: 'approved' | 'rejected' | 'edited' | 'pending' | 'blocked'
   confidence?: 'high' | 'medium' | 'low'
   isAuthentic?: boolean
+  verdict?: ClaimVerdict
+  evidenceId?: string
 }
 
 export interface JobAnalysis {
@@ -164,6 +238,7 @@ export const emptyResume: ResumeData = {
   education: [],
   projects: [],
   certifications: [],
+  notes: '',
   template: 'classic',
 }
 

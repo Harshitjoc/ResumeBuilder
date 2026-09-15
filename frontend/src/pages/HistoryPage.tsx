@@ -5,6 +5,7 @@ import { useAppStore } from '@/store/appStore'
 import AnalysisPanel from '@/components/reports/AnalysisPanel'
 import JobAnalysisCard from '@/components/reports/JobAnalysisCard'
 import { getSessionUser, getAnalysisReports } from '@/services/supabase'
+import { shadowCheck } from '@/services/shadowAts'
 import type { ResumeAnalysis } from '@/services/llm'
 import type { ReportRecord, ReportKind, JobAnalysis } from '@/types/resume'
 
@@ -157,6 +158,11 @@ function SyncStatus({ sync }: { sync: 'idle' | 'loading' | 'synced' | 'guest' })
 function ReportRow({ report, onOpen }: { report: ReportRecord; onOpen: () => void }) {
   const meta = KIND_META[report.kind]
   const Icon = meta.icon
+  const shadow = useMemo(() => {
+    if (typeof report.score === 'number' || !report.resumeSnapshot) return null
+    return shadowCheck(report.resumeSnapshot).check
+  }, [report])
+  const isStale = report.createdAt ? Date.now() - new Date(report.createdAt).getTime() > 365 * 24 * 60 * 60 * 1000 : false
   return (
     <li>
       <button onClick={onOpen} className="flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50">
@@ -167,9 +173,10 @@ function ReportRow({ report, onOpen }: { report: ReportRecord; onOpen: () => voi
           <span className="block truncate text-sm font-semibold text-slate-900">{report.title}</span>
           <span className="text-xs text-slate-500">
             {meta.label} · {new Date(report.createdAt).toLocaleString()}
+            {isStale && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">stale snapshot</span>}
           </span>
         </span>
-        {typeof report.score === 'number' && (
+        {typeof report.score === 'number' ? (
           <span
             className={`rounded-full px-2.5 py-1 text-sm font-bold ${
               report.score >= 60 ? 'bg-emerald-100 text-emerald-700' : report.score >= 40 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
@@ -177,7 +184,16 @@ function ReportRow({ report, onOpen }: { report: ReportRecord; onOpen: () => voi
           >
             {report.score}
           </span>
-        )}
+        ) : shadow ? (
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${
+              shadow.overall_score >= 70 ? 'bg-emerald-100 text-emerald-700' : shadow.overall_score >= 45 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+            }`}
+          >
+            <ShieldCheck className="h-3 w-3" /> {shadow.overall_score}
+            <span className="font-medium text-slate-400">heuristic</span>
+          </span>
+        ) : null}
       </button>
     </li>
   )

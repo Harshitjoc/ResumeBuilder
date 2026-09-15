@@ -5,6 +5,7 @@ import type {
   EvidenceItem,
   ShareRecord,
   ReportRecord,
+  AtsCheck,
 } from '@/types/resume'
 import {
   supabase,
@@ -70,15 +71,26 @@ async function hydrate(userId: string): Promise<void> {
     .order('applied_at', { ascending: false })
   if (appRows?.length) {
     s.setApplications(
-      appRows.map((row) => ({
-        id: String(row.id),
-        jobTitle: String(row.job_title ?? ''),
-        company: String(row.company_name ?? ''),
-        status: (row.status as ApplicationRecord['status']) ?? 'applied',
-        appliedAt: String(row.applied_at ?? new Date().toISOString()),
-        jobUrl: String(row.job_url ?? ''),
-        notes: String(row.notes ?? ''),
-      })),
+      appRows.map((row) => {
+        const atsSnap = (row.ats_snapshot ?? null) as AtsCheck | null
+        return {
+          id: String(row.id),
+          jobTitle: String(row.job_title ?? ''),
+          company: String(row.company_name ?? ''),
+          status: (row.status as ApplicationRecord['status']) ?? 'applied',
+          appliedAt: String(row.applied_at ?? new Date().toISOString()),
+          jobUrl: String(row.job_url ?? ''),
+          notes: String(row.notes ?? ''),
+          resumeVariant: (row.resume_variant ?? undefined) as ResumeData | undefined,
+          atsScore: atsSnap?.overall_score ?? null,
+          atsSnapshot: atsSnap ?? null,
+          genuineScore: typeof row.genuine_score === 'number' ? row.genuine_score : null,
+          keywordLedger: (row.keyword_ledger ?? undefined) as ApplicationRecord['keywordLedger'],
+          keywordGaps: (row.keyword_ledger as Array<{ keyword: string; inResume?: boolean }> | null)
+            ?.filter((e) => !e.inResume)
+            .map((e) => e.keyword),
+        }
+      }),
     )
   }
 
@@ -113,6 +125,7 @@ async function hydrate(userId: string): Promise<void> {
         name: String(row.name),
         resume: row.resume_snapshot as ResumeData,
         atsScore: typeof row.ats_score === 'number' ? row.ats_score : null,
+        heuristicAts: typeof row.heuristic_ats === 'boolean' ? row.heuristic_ats : null,
       })),
     )
   }
@@ -205,6 +218,7 @@ async function pushResume(userId: string, resume: ResumeData, sb: NonNullable<ty
 async function pushApplications(userId: string, applications: ApplicationRecord[], sb: NonNullable<typeof supabase>): Promise<void> {
   for (const app of applications) {
     if (app.id.length > 20) continue // already a cloud uuid
+    const status = app.status === 'saved' ? 'applied' : app.status
     const { data } = await sb
       .from('applications')
       .insert({
@@ -212,9 +226,17 @@ async function pushApplications(userId: string, applications: ApplicationRecord[
         job_url: app.jobUrl,
         job_title: app.jobTitle,
         company_name: app.company,
-        status: app.status,
+        status,
         applied_at: app.appliedAt,
         notes: app.notes,
+        resume_variant: app.resumeVariant ? (app.resumeVariant as unknown as Record<string, unknown>) : null,
+        ats_snapshot: app.atsSnapshot
+          ? (app.atsSnapshot as unknown as Record<string, unknown>)
+          : app.atsScore != null
+            ? { overall_score: app.atsScore }
+            : null,
+        keyword_ledger: app.keywordLedger ? (app.keywordLedger as unknown as Record<string, unknown>[]) : null,
+        genuine_score: app.genuineScore ?? null,
       })
       .select('id')
       .single()
@@ -261,6 +283,7 @@ async function pushShares(userId: string, shares: ShareRecord[], sb: NonNullable
         name: share.name,
         resume_snapshot: share.resume as unknown as Record<string, unknown>,
         ats_score: share.atsScore,
+        heuristic_ats: share.heuristicAts === true,
       })
       .select('id')
       .single()

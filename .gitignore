@@ -8,7 +8,11 @@ frontend/.env
 backend/.venv/
 backend/**/__pycache__/
 backend/.env
+backend/.env.prod
 *.pyc
+
+# Build artifacts
+extension/tsconfig.tsbuildinfo
 
 # OS / editor
 .DS_Store

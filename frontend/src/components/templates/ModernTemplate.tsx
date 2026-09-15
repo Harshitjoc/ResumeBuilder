@@ -139,6 +139,15 @@ export default function ModernTemplate({ resume }: { resume: ResumeData }) {
             </ul>
           </section>
         )}
+
+        {resume.notes && resume.notes.trim() && (
+          <section className="mb-8">
+            <h2 className={sectionTitle}>Notes</h2>
+            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+              {resume.notes}
+            </p>
+          </section>
+        )}
       </div>
     </div>
   )

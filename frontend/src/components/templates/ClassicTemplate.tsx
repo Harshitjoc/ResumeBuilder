@@ -114,6 +114,12 @@ export default function ClassicTemplate({ resume }: { resume: ResumeData }) {
           </ul>
         </section>
       )}
+    {resume.notes && resume.notes.trim() && (
+        <section className="mt-6">
+          <h2 className={sectionTitle}>Notes</h2>
+          <p className="text-sm leading-relaxed whitespace-pre-line">{resume.notes}</p>
+        </section>
+      )}
     </div>
   )
 }

@@ -1,15 +1,15 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useReactToPrint } from 'react-to-print'
 import { Printer } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import ResumePreview from '@/components/ResumePreview'
 import ConversionModal from '@/components/ConversionModal'
-import { sessionIsAnonymous } from '@/services/session'
+import { sessionIsVisitor } from '@/services/session'
 
 export default function PreviewPage() {
   const resume = useAppStore((s) => s.resume)
   const sessionStatus = useAppStore((s) => s.sessionStatus)
-  const sessionUser = useAppStore((s) => s.sessionUser)
   const [conversionOpen, setConversionOpen] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
 
@@ -19,7 +19,7 @@ export default function PreviewPage() {
   })
 
   const handleDownloadClick = () => {
-    if (sessionIsAnonymous(sessionStatus, sessionUser)) {
+    if (sessionIsVisitor(sessionStatus)) {
       setConversionOpen(true)
       return
     }
@@ -28,11 +28,14 @@ export default function PreviewPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-900">Resume Preview</h1>
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="eyebrow mb-1">Live preview</p>
+          <h1 className="text-lg font-semibold tracking-tight text-slate-900">Resume Preview</h1>
+        </div>
         <button
           onClick={handleDownloadClick}
-          className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+          className="btn-pencil"
         >
           <Printer className="h-4 w-4" /> Print / PDF
         </button>
@@ -41,15 +44,21 @@ export default function PreviewPage() {
       {conversionOpen && <ConversionModal onClose={() => setConversionOpen(false)} />}
 
       {resume.contact.fullName ? (
-        <div className="mx-auto max-w-[800px] rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="sheet mx-auto max-w-[800px] p-8">
           <div ref={printRef}>
             <ResumePreview resume={resume} />
           </div>
         </div>
       ) : (
-        <p className="text-sm text-slate-400">
-          Your resume looks empty. Head to the Resume Builder to add your details.
-        </p>
+        <div className="sheet border-dashed bg-transparent p-10 text-center">
+          <p className="text-sm text-slate-500">
+            Your resume looks empty.{' '}
+            <Link to="/builder" className="font-semibold text-blue-700 underline decoration-blue-400 underline-offset-2">
+              Start building
+            </Link>
+            {' '}to see it on paper.
+          </p>
+        </div>
       )}
     </div>
   )

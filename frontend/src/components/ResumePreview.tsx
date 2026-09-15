@@ -1,11 +1,7 @@
 import type { ResumeData } from '@/types/resume'
-import ClassicTemplate from '@/components/templates/ClassicTemplate'
-import ModernTemplate from '@/components/templates/ModernTemplate'
+import { getTemplate } from '@/components/templates'
 
 export default function ResumePreview({ resume }: { resume: ResumeData }) {
-  return resume.template === 'modern' ? (
-    <ModernTemplate resume={resume} />
-  ) : (
-    <ClassicTemplate resume={resume} />
-  )
+  const Template = getTemplate(resume.template)
+  return <Template resume={resume} />
 }

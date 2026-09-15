@@ -1,13 +1,16 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Sparkles, Cloud, FileText, Target, ClipboardCheck, LayoutGrid, Copy, Download, RefreshCw } from 'lucide-react'
+import { Loader2, Sparkles, Cloud, FileText, Target, ClipboardCheck, LayoutGrid, Copy, Download, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import ApiKeyManager from '@/components/ApiKeyManager'
 import JobAnalysisCard from '@/components/reports/JobAnalysisCard'
 import AtsPanel from '@/components/reports/AtsPanel'
 import Gate, { QuotaNotice } from '@/components/Gate'
-import { parseJobDescription, analyzeCompatibility, customizeResume, generateCoverLetter, generateInterviewPrep, atsCheck, submitJob, getJob } from '@/services/llm'
-import type { JobAnalysis, VerificationChange, AtsCheck, InterviewPrep } from '@/types/resume'
+import FitWarningModal from '@/components/FitWarningModal'
+import { parseJobDescription, analyzeCompatibility, customizeResume, redesignResume, generateCoverLetter, generateInterviewPrep, atsCheck, submitJob, getJob } from '@/services/llm'
+import { buildApplicationDna } from '@/services/applicationDna'
+import { shadowCheck } from '@/services/shadowAts'
+import type { JobAnalysis, VerificationChange, AtsCheck, InterviewPrep, TruthSummary } from '@/types/resume'
 import { saveJobPosting, saveAnalysisReport, getSessionUser } from '@/services/supabase'
 
 const apiKeysToRecord = (apiKeys: NonNullable<ReturnType<typeof useAppStore.getState>['apiKeys']>) => ({
@@ -22,11 +25,16 @@ export default function JobsPage() {
   const targetUser = useAppStore((s) => s.targetUser)
   const jobPosting = useAppStore((s) => s.jobPosting)
   const setJobPosting = useAppStore((s) => s.setJobPosting)
+  const compatibilityScore = useAppStore((s) => s.compatibilityScore)
   const setCompatibilityScore = useAppStore((s) => s.setCompatibilityScore)
   const setPendingChanges = useAppStore((s) => s.setPendingChanges)
   const addReport = useAppStore((s) => s.addReport)
   const setReportCloudId = useAppStore((s) => s.setReportCloudId)
   const addApplication = useAppStore((s) => s.addApplication)
+  const evidence = useAppStore((s) => s.evidence)
+  const setPendingVariant = useAppStore((s) => s.setPendingVariant)
+  const pendingVariant = useAppStore((s) => s.pendingVariant)
+  const confirmedClaims = useAppStore((s) => s.confirmedClaims)
   const navigate = useNavigate()
 
   const [loading, setLoading] = useState<'parse' | 'compat' | 'customize' | null>(null)
@@ -40,12 +48,21 @@ export default function JobsPage() {
   const [coverCopied, setCoverCopied] = useState(false)
 
   const [interviewPrep, setInterviewPrep] = useState<InterviewPrep | null>(null)
+  const [truthSummary, setTruthSummary] = useState<TruthSummary | null>(null)
   const [prepLoading, setPrepLoading] = useState(false)
 
   const [atsResult, setAtsResult] = useState<AtsCheck | null>(null)
   const [atsLoading, setAtsLoading] = useState(false)
 
+  const shadowAts = useMemo(() => {
+    if (!parsedJob) return null
+    return shadowCheck(resume, parsedJob as JobAnalysis | Record<string, unknown>)
+  }, [resume, parsedJob])
+
   const [customizeJob, setCustomizeJob] = useState<{ id: string; status: string } | null>(null)
+
+  const [showFitWarning, setShowFitWarning] = useState(false)
+  const [redesigning, setRedesigning] = useState(false)
 
   const hasKeys = Boolean(apiKeys?.primaryKey)
 
@@ -103,7 +120,7 @@ export default function JobsPage() {
     setError('')
     setLoading('customize')
     try {
-      const result = await customizeResume(resume, parsedJob, analysis, apiKeysToRecord(apiKeys), targetUser ?? undefined)
+      const result = await customizeResume(resume, parsedJob, analysis, apiKeysToRecord(apiKeys), targetUser ?? undefined, evidence)
       applyCustomizationResult(result)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Customization failed')
@@ -125,9 +142,14 @@ export default function JobsPage() {
         customized: (c.customized as string) ?? '',
         reason: (c.reason as string) ?? '',
         severity: (c.change_severity as 'low' | 'medium' | 'high') ?? 'low',
-        action: 'pending' as const,
+        action: (c.action as VerificationChange['action']) === 'blocked'
+          ? ('blocked' as const)
+          : ('pending' as const),
         confidence: (c.confidence as 'high' | 'medium' | 'low' | undefined) ?? undefined,
         isAuthentic: (c.is_authentic as boolean | undefined) ?? undefined,
+        verdict: (c.action as VerificationChange['action']) === 'blocked'
+          ? ('unverifiable' as const)
+          : undefined,
       }),
     )
     if (changes.length === 0) {
@@ -143,6 +165,7 @@ export default function JobsPage() {
       })
     }
     setPendingChanges(changes)
+    setPendingVariant({ resume, baseResume: resume, analysis: analysis ?? undefined, ats: atsResult ?? undefined })
     navigate('/verify')
   }
 
@@ -176,7 +199,7 @@ export default function JobsPage() {
     try {
       const { jobId } = await submitJob(
         'customize',
-        { resume, job: parsedJob, compatibility: analysis },
+        { resume, job: parsedJob, compatibility: analysis, evidence },
         apiKeysToRecord(apiKeys),
         targetUser ?? undefined,
       )
@@ -184,6 +207,35 @@ export default function JobsPage() {
       pollJob(jobId)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start background job')
+    }
+  }
+
+  const handleCustomizeClick = () => {
+    if (compatibilityScore !== null && compatibilityScore < 40) {
+      setShowFitWarning(true)
+    } else {
+      handleCustomize()
+    }
+  }
+
+  const handleRedesign = async () => {
+    if (!analysis) return
+    setRedesigning(true)
+    setError('')
+    try {
+      const result = await redesignResume(
+        resume as unknown as Record<string, unknown>,
+        parsedJob!,
+        { overall_score: compatibilityScore, ...analysis } as Record<string, unknown>,
+        apiKeysToRecord(apiKeys!),
+        targetUser ?? undefined,
+        evidence,
+      )
+      applyCustomizationResult(result)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Redesign failed')
+    } finally {
+      setRedesigning(false)
     }
   }
 
@@ -206,8 +258,9 @@ export default function JobsPage() {
     setError('')
     setPrepLoading(true)
     try {
-      const result = await generateInterviewPrep(resume, parsedJob, apiKeysToRecord(apiKeys), targetUser ?? undefined)
+      const result = await generateInterviewPrep(resume, parsedJob, apiKeysToRecord(apiKeys), targetUser ?? undefined, undefined, evidence, confirmedClaims)
       setInterviewPrep(result.prep)
+      setTruthSummary(result.truthSummary ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Interview prep failed')
     } finally {
@@ -220,7 +273,7 @@ export default function JobsPage() {
     setError('')
     setAtsLoading(true)
     try {
-      const result = await atsCheck(resume, parsedJob, apiKeysToRecord(apiKeys), targetUser ?? undefined)
+      const result = await atsCheck(resume, parsedJob, apiKeysToRecord(apiKeys), targetUser ?? undefined, evidence)
       setAtsResult(result.check)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'ATS check failed')
@@ -230,13 +283,26 @@ export default function JobsPage() {
   }
 
   const handleTrackApplication = () => {
+    const source = { resume, baseResume: resume, analysis, ats: atsResult ?? undefined }
+    const variant = pendingVariant?.resume ?? source.resume
+    const dna = buildApplicationDna({
+      resume: variant,
+      baseResume: pendingVariant?.baseResume ?? source.baseResume,
+      analysis: pendingVariant?.analysis ?? source.analysis ?? undefined,
+      ats: pendingVariant?.ats ?? source.ats,
+      evidence,
+      confirmedClaims,
+    })
     addApplication({
       jobTitle: analysis?.jobTitle || (parsedJob?.job_title as string) || '',
       company: analysis?.company || (parsedJob?.company as string) || '',
       status: 'applied',
       jobUrl: '',
       notes: '',
+      ...dna,
+      jobSource: 'customize',
     })
+    setPendingVariant(undefined)
     navigate('/applications')
   }
 
@@ -294,12 +360,25 @@ export default function JobsPage() {
 
       <QuotaNotice />
 
+      {showFitWarning && (
+        <FitWarningModal
+          score={compatibilityScore ?? 0}
+          recommendation={analysis?.recommendation}
+          concerns={analysis?.concerns}
+          onConfirm={() => {
+            setShowFitWarning(false)
+            handleCustomize()
+          }}
+          onDismiss={() => setShowFitWarning(false)}
+        />
+      )}
+
       {analysis && (
         <>
           <JobAnalysisCard analysis={analysis} />
           <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={handleCustomize}
+              onClick={handleCustomizeClick}
               disabled={loading !== null}
               className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
             >
@@ -327,6 +406,16 @@ export default function JobsPage() {
                 </button>
               </Gate>
             )}
+            <Gate inline reason="Resume redesign is a Pro feature — it restructures your resume for ATS pass-through.">
+              <button
+                onClick={handleRedesign}
+                disabled={redesigning}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {redesigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Redesign for this job
+              </button>
+            </Gate>
             <Gate inline reason="Cover letters are a Pro feature.">
               <button
                 onClick={handleCoverLetter}
@@ -408,10 +497,83 @@ export default function JobsPage() {
             <NoteList title="Talking points" items={interviewPrep.talking_points} />
             <NoteList title="Questions to ask" items={interviewPrep.questions_to_ask} />
           </div>
+          {truthSummary && (
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3 text-xs">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-700">
+                <ShieldCheck className="h-3.5 w-3.5" /> {truthSummary.proofBacked} proof-backed
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+                {truthSummary.inResume} claims in resume
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
+                {truthSummary.needsResearch} need research
+              </span>
+            </div>
+          )}
+          {Array.isArray(interviewPrep.truth_points) && interviewPrep.truth_points.length > 0 && (
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Linked to your resume — what you can back up
+              </p>
+              <ul className="space-y-1.5">
+                {interviewPrep.truth_points.map((p, i) => (
+                  <li key={i} className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+                    <span
+                      className={`mt-0.5 shrink-0 text-[11px] font-bold uppercase tracking-wide ${
+                        p.status === 'proof-backed'
+                          ? 'text-emerald-600'
+                          : p.status === 'needs-research'
+                            ? 'text-amber-600'
+                            : 'text-slate-400'
+                      }`}
+                    >
+                      {p.status === 'proof-backed' ? 'backed' : p.status === 'needs-research' ? 'verify' : 'in-resume'}
+                    </span>
+                    <span className="text-sm text-slate-700">{p.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
       )}
 
       {atsResult && <AtsPanel check={atsResult} />}
+
+      {shadowAts && (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-slate-900">Offline ATS estimate</h2>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold ${
+                shadowAts.check.overall_score >= 70
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : shadowAts.check.overall_score >= 45
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-red-50 text-red-700'
+              }`}
+            >
+              <ClipboardCheck className="h-4 w-4" /> {shadowAts.check.overall_score}
+              <span className="text-xs font-medium opacity-70">heuristic</span>
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Deterministic, offline estimate computed locally — never uses your API key. The gated <strong>Run ATS check</strong> button runs a full LLM-tailored ATS review (Pro), which often scores differently because it reads context, not just terms.
+          </p>
+          {shadowAts.keywordLedger.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Required terms not found in your resume</p>
+              <div className="flex flex-wrap gap-1.5">
+                {shadowAts.keywordLedger.map((k, i) => (
+                  <span key={i} className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600">
+                    {k.keyword}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

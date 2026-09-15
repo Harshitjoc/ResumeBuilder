@@ -1,10 +1,7 @@
 import { isSupabaseConfigured } from '@/services/supabase'
-import type { SessionStatus, SessionUser } from '@/store/appStore'
+import type { SessionStatus } from '@/store/appStore'
 
-export function sessionIsAnonymous(
-  status: SessionStatus,
-  user: SessionUser | null,
-): boolean {
+export function sessionIsVisitor(status: SessionStatus): boolean {
   if (!isSupabaseConfigured) return false
-  return status === 'anonymous' || user?.is_anonymous === true
+  return status === 'signed-out'
 }

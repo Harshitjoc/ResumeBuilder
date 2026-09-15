@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Trash2, Check, Cloud, ClipboardCheck, Share2, Database, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Check, Cloud, ClipboardCheck, Share2, Database, Loader2, Eraser, Copy, MessageCircle } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
-import type { ResumeData, Experience, Education, Project, Certification } from '@/types/resume'
+import type { ResumeData, Experience, Education, Project, Certification, SavedTemplate, TemplateId, AtsCheck } from '@/types/resume'
 import ResumePreview from '@/components/ResumePreview'
 import AtsPanel from '@/components/reports/AtsPanel'
 import Gate, { QuotaNotice } from '@/components/Gate'
+import { TEMPLATE_IDS, TEMPLATE_META } from '@/components/templates'
 import { atsCheck, createShare } from '@/services/llm'
+import { shadowCheck } from '@/services/shadowAts'
+import { evidenceFreshness } from '@/services/freshness'
 import { saveResume, getSessionUser } from '@/services/supabase'
 
 const apiKeysToRecord = (apiKeys: NonNullable<ReturnType<typeof useAppStore.getState>['apiKeys']>) => ({
@@ -15,6 +18,28 @@ const apiKeysToRecord = (apiKeys: NonNullable<ReturnType<typeof useAppStore.getS
   model: apiKeys.primaryModel,
 })
 
+function ConfirmResetModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="mx-4 w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-lg">
+        <h3 className="text-base font-semibold text-slate-900">Clear your workspace?</h3>
+        <p className="mt-2 text-sm text-slate-500">
+          This erases everything on this device — resume fields, evidence, applications, reports, and shares. Cloud-synced
+          data will be restored from your account on the next sync. This cannot be undone.
+        </p>
+        <div className="mt-5 flex justify-end gap-3">
+          <button onClick={onCancel} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
+            Clear all
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function BuilderPage() {
   const resume = useAppStore((s) => s.resume)
   const apiKeys = useAppStore((s) => s.apiKeys)
@@ -22,13 +47,33 @@ export default function BuilderPage() {
   const evidence = useAppStore((s) => s.evidence)
   const removeEvidence = useAppStore((s) => s.removeEvidence)
   const addShare = useAppStore((s) => s.addShare)
+  const resetWorkspace = useAppStore((s) => s.resetWorkspace)
   const [cloudStatus, setCloudStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [atsLoading, setAtsLoading] = useState(false)
-  const [atsResult, setAtsResult] = useState<import('@/types/resume').AtsCheck | null>(null)
+  const [atsResult, setAtsResult] = useState<AtsCheck | null>(null)
   const [atsError, setAtsError] = useState('')
+  const heuristicScore = useMemo(() => {
+    const isEmpty =
+      !resume.contact.fullName &&
+      !resume.professionalSummary &&
+      resume.skills.length === 0 &&
+      resume.experience.length === 0 &&
+      resume.education.length === 0
+    if (isEmpty) return null
+    return shadowCheck(resume).check
+  }, [resume])
   const [shareCopied, setShareCopied] = useState(false)
   const [shareLoading, setShareLoading] = useState(false)
   const [shareError, setShareError] = useState('')
+  const [shareUrl, setShareUrl] = useState('')
+  const [copiedEvidenceId, setCopiedEvidenceId] = useState('')
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const waUrl = useMemo(() => {
+    if (!shareUrl) return ''
+    const hasLlmScore = Boolean(atsResult?.overall_score)
+    const text = `My verified resume${hasLlmScore ? ` (ATS ${atsResult!.overall_score})` : ' — ATS offline estimate'}: ${shareUrl}`
+    return `https://wa.me/?text=${encodeURIComponent(text)}`
+  }, [shareUrl, atsResult])
 
   const handleSaveToCloud = useCallback(async () => {
     const user = await getSessionUser()
@@ -61,7 +106,7 @@ export default function BuilderPage() {
     setAtsError('')
     setAtsResult(null)
     try {
-      const result = await atsCheck(resume, null, apiKeysToRecord(apiKeys), targetUser ?? undefined)
+      const result = await atsCheck(resume, null, apiKeysToRecord(apiKeys), targetUser ?? undefined, evidence)
       setAtsResult(result.check)
     } catch (e) {
       setAtsError(e instanceof Error ? e.message : 'ATS check failed')
@@ -78,15 +123,20 @@ export default function BuilderPage() {
         name: resume.contact.fullName || 'Resume',
         atsScore: atsResult?.overall_score ?? null,
         resume,
+        evidence,
+        heuristicAts: atsResult ? undefined : true,
+        ref: localStorage.getItem('rb-referrer') ?? undefined,
       })
       addShare({
         slug: created.slug,
         name: created.name,
         resume,
         atsScore: created.atsScore,
+        evidence: created.evidence ?? evidence,
       })
       const url = `${window.location.origin}/share/${created.slug}`
       await navigator.clipboard.writeText(url)
+      setShareUrl(url)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2000)
     } catch (e) {
@@ -96,11 +146,43 @@ export default function BuilderPage() {
     }
   }
 
+  const { stale: staleIds, aging: agingIds } = evidenceFreshness(evidence)
+
   return (
     <div className="space-y-4">
+      {showClearConfirm && (
+        <ConfirmResetModal
+          onConfirm={() => { resetWorkspace(); setShowClearConfirm(false) }}
+          onCancel={() => setShowClearConfirm(false)}
+        />
+      )}
+
       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
-        <h1 className="text-base font-semibold text-slate-900">Resume Builder</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-base font-semibold text-slate-900">Resume Builder</h1>
+          {heuristicScore && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                heuristicScore.overall_score >= 70
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : heuristicScore.overall_score >= 45
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-red-50 text-red-700'
+              }`}
+              title="Deterministic offline estimate — run a full ATS check for the LLM-assisted score"
+            >
+              <ClipboardCheck className="h-3 w-3" /> ATS {heuristicScore.overall_score} · heuristic
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowClearConfirm(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50"
+          >
+            <Eraser className="h-4 w-4" />
+            Clear all
+          </button>
           <Gate inline reason="ATS checks are a Pro feature.">
             <button
               onClick={handleAtsCheck}
@@ -121,6 +203,16 @@ export default function BuilderPage() {
               {shareLoading ? 'Creating...' : shareCopied ? 'Copied!' : 'Share resume'}
             </button>
           </Gate>
+          {waUrl && (
+            <a
+              href={waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#25D366] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"
+            >
+              <MessageCircle className="h-4 w-4" /> WhatsApp
+            </a>
+          )}
           <button
             onClick={handleSaveToCloud}
             disabled={cloudStatus === 'saving'}
@@ -156,21 +248,47 @@ export default function BuilderPage() {
             </span>
           </div>
           <div className="space-y-2">
-            {evidence.map((item) => (
-              <div key={item.id} className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                  item.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
-                  item.confidence === 'medium' ? 'bg-blue-100 text-blue-700' :
-                  'bg-amber-100 text-amber-700'
-                }`}>
-                  {item.category}
-                </span>
-                <span className="min-w-0 flex-1 text-slate-700">{item.text}</span>
-                <button onClick={() => removeEvidence(item.id)} className="shrink-0 text-slate-400 hover:text-red-600">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
+            {evidence.map((item) => {
+              const fresh = staleIds.includes(item.id) ? ('stale' as const) : agingIds.includes(item.id) ? ('aging' as const) : ('fresh' as const)
+              return (
+                <div key={item.id} className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                    item.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
+                    item.confidence === 'medium' ? 'bg-blue-100 text-blue-700' :
+                    'bg-amber-100 text-amber-700'
+                  }`}>
+                    {item.category}
+                  </span>
+                  <span className={`min-w-0 flex-1 text-slate-700 ${fresh === 'stale' ? 'opacity-70' : ''}`}>{item.text}</span>
+                  {fresh !== 'fresh' && (
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        fresh === 'stale' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                      }`}
+                      title={item.createdAt ? `Added ${new Date(item.createdAt).toLocaleDateString()}` : undefined}
+                    >
+                      {fresh === 'stale' ? 'stale proof · add a recent update' : 'aging proof · worth refreshing'}
+                    </span>
+                  )}
+                  {fresh === 'stale' && (
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(item.text).catch(() => {})
+                        setCopiedEvidenceId(item.id)
+                        setTimeout(() => setCopiedEvidenceId(''), 1500)
+                      }}
+                      className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 hover:text-slate-800"
+                      title="Copy claim text for a newer evidence draft"
+                    >
+                      <Copy className="h-3 w-3" /> {copiedEvidenceId === item.id ? 'Copied' : 'Copy as newer draft'}
+                    </button>
+                  )}
+                  <button onClick={() => removeEvidence(item.id)} className="shrink-0 text-slate-400 hover:text-red-600">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )
+            })}
           </div>
         </section>
       )}
@@ -261,12 +379,103 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   )
 }
 
+function TemplateThumb({ id }: { id: TemplateId }) {
+  const bar = 'h-1.5 rounded-full bg-slate-300'
+  const nameBar = 'mx-auto h-2.5 w-2/3 rounded-sm bg-slate-500'
+  if (id === 'modern') {
+    return (
+      <div className="flex h-full">
+        <div className="w-1/3 bg-indigo-500" />
+        <div className="flex-1 space-y-2 p-3">
+          <div className="mx-auto h-2.5 w-2/3 rounded-sm bg-slate-600" />
+          <div className={bar} />
+          <div className={`${bar} w-4/5`} />
+        </div>
+      </div>
+    )
+  }
+  if (id === 'minimal') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center space-y-3">
+        <div className="h-2.5 w-2/3 rounded-sm bg-slate-400" />
+        <div className={bar} />
+        <div className="mx-auto h-1 w-3/4 rounded-full bg-slate-200" />
+        <div className="h-1 w-2/3 rounded-full bg-slate-200" />
+      </div>
+    )
+  }
+  if (id === 'bold') {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex h-1/2 items-center justify-between space-y-1 bg-slate-900 px-3">
+          <div className="h-2.5 w-1/3 rounded-sm bg-slate-200" />
+          <div className="h-3 w-3 rounded-sm bg-amber-500" />
+        </div>
+        <div className="flex-1 space-y-2 p-3">
+          <div className={`${bar} w-2/3`} />
+          <div className={bar} />
+        </div>
+      </div>
+    )
+  }
+  if (id === 'professional') {
+    return (
+      <div className="flex h-full">
+        <div className="w-1/3 space-y-2 bg-slate-100 p-3">
+          <div className="h-2.5 w-2/3 bg-slate-500" />
+          <div className="h-1 w-full rounded-full bg-slate-300" />
+          <div className="h-1 w-3/4 rounded-full bg-slate-300" />
+        </div>
+        <div className="flex-1 space-y-2 p-3">
+          <div className={`${bar} w-2/3`} />
+          <div className={bar} />
+          <div className={`${bar} w-4/5`} />
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex h-full flex-col items-center justify-center space-y-2 p-4">
+      <div className={nameBar} />
+      <div className={bar} />
+      <div className={`${bar} w-4/5`} />
+      <div className="h-0.5 w-2/3 rounded-full bg-slate-200" />
+    </div>
+  )
+}
+
+function ConfirmLoadModal({ name, onConfirm, onCancel }: { name: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="mx-4 w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-lg">
+        <h3 className="text-base font-semibold text-slate-900">Use "{name}"?</h3>
+        <p className="mt-2 text-sm text-slate-500">
+          This replaces your current resume fields with the ones saved in this template. Your current data is not deleted, but
+          it will be overwritten on this device.
+        </p>
+        <div className="mt-5 flex justify-end gap-3">
+          <button onClick={onCancel} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+            Use template
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ResumeForm() {
   const resume = useAppStore((s) => s.resume)
   const setResume = useAppStore((s) => s.setResume)
   const updateContact = useAppStore((s) => s.updateContact)
   const updateSummary = useAppStore((s) => s.updateSummary)
+  const updateNotes = useAppStore((s) => s.updateNotes)
   const updateSkills = useAppStore((s) => s.updateSkills)
+  const customTemplates = useAppStore((s) => s.customTemplates)
+  const removeCustomTemplate = useAppStore((s) => s.removeCustomTemplate)
+  const [templateToLoad, setTemplateToLoad] = useState<SavedTemplate | null>(null)
 
   const update = (patch: Partial<ResumeData>) => setResume({ ...resume, ...patch })
   const updateExperience = (list: Experience[]) => update({ experience: list })
@@ -276,6 +485,17 @@ function ResumeForm() {
 
   return (
     <div className="space-y-6">
+      {templateToLoad && (
+        <ConfirmLoadModal
+          name={templateToLoad.name}
+          onConfirm={() => {
+            setResume({ ...templateToLoad.resume })
+            setTemplateToLoad(null)
+          }}
+          onCancel={() => setTemplateToLoad(null)}
+        />
+      )}
+
       <Card title="Contact Information">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Full name" value={resume.contact.fullName} onChange={(v) => updateContact({ fullName: v })} />
@@ -296,22 +516,73 @@ function ResumeForm() {
       </Card>
 
       <Card title="Template">
-        <div className="flex gap-3">
-          {(['classic', 'modern'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => update({ template: t })}
-              className={`flex-1 rounded-lg border px-4 py-3 text-sm font-medium capitalize transition ${
-                resume.template === t
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-300 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {resume.template === t && <Check className="mr-1 inline h-4 w-4" />}
-              {t}
-            </button>
-          ))}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {TEMPLATE_IDS.map((t) => {
+            const meta = TEMPLATE_META.find((m) => m.id === t)
+            const selected = resume.template === t
+            return (
+              <button
+                key={t}
+                onClick={() => update({ template: t })}
+                className={`group overflow-hidden rounded-lg border text-left transition ${
+                  selected
+                    ? 'border-slate-900 ring-2 ring-slate-900/10'
+                    : 'border-slate-300 hover:border-slate-400'
+                }`}
+              >
+                <div className={`h-24 bg-white ${selected ? 'bg-slate-50' : ''}`}>
+                  <TemplateThumb id={t} />
+                </div>
+                <div className={`flex items-center justify-between border-t px-3 py-2 ${selected ? 'border-slate-900 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+                  <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-slate-800'}`}>
+                    {meta?.label ?? t}
+                  </span>
+                  {selected && <Check className="h-4 w-4 text-white" />}
+                </div>
+                <p className="hidden bg-white px-3 pb-2 text-xs text-slate-500 sm:block">
+                  {selected ? meta?.description : meta?.description}
+                </p>
+              </button>
+            )
+          })}
         </div>
+
+        {customTemplates.length > 0 && (
+          <div className="mt-6 border-t border-slate-200 pt-4">
+            <h3 className="text-sm font-semibold text-slate-900">My templates</h3>
+            <p className="mt-0.5 text-xs text-slate-500">Saved from your imports — applies the style and content.</p>
+            <ul className="mt-3 space-y-2">
+              {customTemplates.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-800">{t.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {new Date(t.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      onClick={() => setTemplateToLoad(t)}
+                      className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700"
+                    >
+                      Use
+                    </button>
+                    <button
+                      onClick={() => removeCustomTemplate(t.id)}
+                      aria-label={`Delete ${t.name}`}
+                      className="rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-600 hover:bg-red-50 hover:text-red-600"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Card>
 
       <Card title="Work Experience">
@@ -344,6 +615,16 @@ function ResumeForm() {
           <CertEditor key={cert.id} cert={cert} onChange={(updated) => updateCerts(resume.certifications.map((c) => (c.id === updated.id ? updated : c)))} onRemove={() => updateCerts(resume.certifications.filter((c) => c.id !== cert.id))} />
         ))}
         <AddButton label="Add certification" onClick={() => updateCerts([...resume.certifications, newCert()])} />
+      </Card>
+
+      <Card title="Notes">
+        <Field
+          textarea
+          label="Additional notes"
+          value={resume.notes}
+          onChange={updateNotes}
+          placeholder="Awards, honors, languages, volunteer work, or anything else you want to include..."
+        />
       </Card>
     </div>
   )

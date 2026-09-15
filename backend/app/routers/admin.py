@@ -43,15 +43,69 @@ class SettingsUpdate(BaseModel):
 
 
 @router.get("/users")
-async def list_users(limit: int = 50, search: str | None = None, role: str | None = None):
+async def list_users(
+    page: int = 1,
+    page_size: int = 25,
+    search: str | None = None,
+    role: str | None = None,
+):
     sb = _sb_or_503()
-    q = sb.table("profiles").select("id,full_name,role,plan,plan_expires_at,created_at,updated_at")
-    if role in ("user", "admin", "banned"):
-        q = q.eq("role", role)
-    if search:
-        q = q.or_(f"full_name.ilike.%{search}%")
-    res = q.limit(min(limit, 200)).order("created_at", desc=True).execute()
-    return {"users": res.data}
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+
+    def _query(with_count: bool = False):
+        q = sb.table("profiles").select(
+            "id,full_name,role,plan,plan_expires_at,created_at,updated_at",
+            count="exact" if with_count else None,
+        )
+        if role in ("user", "admin", "banned"):
+            q = q.eq("role", role)
+        if search and search.strip():
+            q = q.or_(f"full_name.ilike.*{search.strip()}*")
+        return q
+
+    count_res = _query(with_count=True).execute()
+    total = count_res.count or 0
+
+    res = (
+        _query()
+        .order("created_at", desc=True)
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+        .execute()
+    )
+    return {"users": res.data, "total": total, "page": page, "pageSize": page_size}
+
+
+class BulkDeleteUsers(BaseModel):
+    ids: list[str]
+
+
+@router.post("/users/bulk-delete")
+async def bulk_delete_users(body: BulkDeleteUsers, ctx: AuthContext = Depends(require_admin)):
+    ids = [i for i in (body.ids or []) if isinstance(i, str) and i.strip()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No user ids provided")
+    if len(ids) > 100:
+        raise HTTPException(status_code=400, detail="At most 100 users per bulk delete")
+
+    sb = _sb_or_503()
+    existing = sb.table("profiles").select("id,role,plan").in_("id", ids).execute()
+    targets = [r for r in existing.data if r.get("role") != "admin"]
+    if ctx.user_id:
+        targets = [r for r in targets if r.get("id") != ctx.user_id]
+    target_ids = [r["id"] for r in targets]
+
+    if target_ids:
+        sb.table("profiles").delete().in_("id", target_ids).execute()
+    _audit(
+        ctx,
+        "user.bulk_delete",
+        "user",
+        ",".join(target_ids) if target_ids else "none",
+        before_data={"ids": target_ids, "skipped": [r["id"] for r in existing.data if r["id"] not in target_ids]},
+    )
+    return {"ok": True, "deleted": len(target_ids)}
 
 
 @router.get("/users/{user_id}")
@@ -63,15 +117,15 @@ async def user_detail(user_id: str):
     return {"user": res.data[0]}
 
 
-def _audit(ctx: AuthContext, action: str, target_type: str, target_id: str, before=None, after=None, reason: str | None = None, ip: str | None = None):
+def _audit(ctx: AuthContext, action: str, target_type: str, target_id: str, before_data=None, after_data=None, reason: str | None = None, ip: str | None = None):
     audit.log(
         actor_user_id=ctx.user_id,
         actor_label=ctx.user_id or "admin",
         action=action,
         target_type=target_type,
         target_id=target_id,
-        before_data=before,
-        after_data=after,
+        before_data=before_data,
+        after_data=after_data,
         reason=reason,
         ip=ip,
     )
@@ -164,10 +218,21 @@ async def get_kpis():
 
 
 @router.get("/audit")
-async def get_audit(limit: int = 50):
+async def get_audit(page: int = 1, page_size: int = 25):
     sb = _sb_or_503()
-    res = sb.table("admin_audit_log").select("*").limit(min(limit, 200)).order("created_at", desc=True).execute()
-    return {"logs": res.data}
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+    count_res = sb.table("admin_audit_log").select("id", count="exact").execute()
+    total = count_res.count or 0
+    res = (
+        sb.table("admin_audit_log")
+        .select("*")
+        .order("created_at", desc=True)
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+        .execute()
+    )
+    return {"logs": res.data, "total": total, "page": page, "pageSize": page_size}
 
 
 def _setting_or(sb, key: str, field: str, default: Any) -> Any:

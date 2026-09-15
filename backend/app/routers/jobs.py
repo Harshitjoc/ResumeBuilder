@@ -14,6 +14,7 @@ from app.routers.llm import (
     _as_dict,
     _normalize_customization,
 )
+from app.services.extract import apply_hard_gate, verifiable_claims
 from app.services.entitlements import get_plan, is_pro
 from app.services.prompts import (
     ats_check_prompt,
@@ -36,12 +37,14 @@ class JobSubmit(BaseModel):
 def _run_customize(job_id: str, payload: dict, api_keys: ApiKeys, target_user: str | None):
     try:
         llm = _service(api_keys)
+        evidence = payload.get("evidence") or []
         raw = llm.generate_json(
             customize_prompt(
                 payload.get("resume", {}),
                 payload.get("job", {}),
                 payload.get("compatibility", {}),
                 target_user=target_user,
+                evidence=evidence,
             ),
             max_tokens=4000,
         )
@@ -51,7 +54,10 @@ def _run_customize(job_id: str, payload: dict, api_keys: ApiKeys, target_user: s
             for item in data.get("customizations", [])
             if (normalized := _normalize_customization(item)) is not None
         ]
-        data["customizations"] = customizations
+        data["customizations"] = apply_hard_gate(customizations, evidence)
+        data["verifiability"] = verifiable_claims(
+            payload.get("resume", {}), evidence, confirmed=[]
+        )
         _jobs[job_id]["result"] = data
         _jobs[job_id]["status"] = "done"
         _jobs[job_id]["finishedAt"] = datetime.now(timezone.utc).isoformat()

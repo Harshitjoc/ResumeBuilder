@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import config
 from app.config import CORS_ORIGINS
 from app.middleware import HardeningMiddleware
-from app.routers import admin, ats, auth, jobs, llm, me, payments, shares, upload
+from app.routers import admin, ats, auth, ext, jobs, llm, me, payments, shares, upload
 
 app = FastAPI(title="Resume Builder API", version="0.1.0")
 
@@ -15,6 +15,7 @@ app.add_middleware(HardeningMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"chrome-extension://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,6 +30,7 @@ app.include_router(jobs.router)
 app.include_router(me.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
+app.include_router(ext.router)
 
 
 @app.get("/api/health")

@@ -154,8 +154,10 @@ async def require_pro(ctx: AuthContext = Depends(get_user_http)) -> AuthContext:
             status_code=403,
             detail="This feature requires an account. Sign in to continue",
         )
-    from app.services.entitlements import get_plan, is_pro
+    from app.services.entitlements import get_plan, is_admin_user, is_pro
 
+    if is_admin_user(ctx.user_id):
+        return ctx
     plan = get_plan(ctx.user_id or "", ctx.user_id)
     if not is_pro(plan, ctx.user_id, identity_key=ctx.identity_key):
         raise HTTPException(status_code=403, detail="This feature requires Pro. Upgrade from /upgrade")

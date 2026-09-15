@@ -1,12 +1,15 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, FileText, Sparkles, Loader2, Check, Wand2, Database } from 'lucide-react'
+import { Upload, FileText, Sparkles, Loader2, Check, Wand2, Database, ClipboardCheck } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import ApiKeyManager from '@/components/ApiKeyManager'
 import AnalysisPanel from '@/components/reports/AnalysisPanel'
 import { parseResume, analyzeResume, extractResumeText, type ResumeAnalysis } from '@/services/llm'
+import { shadowCheck } from '@/services/shadowAts'
 import { saveAnalysisReport, getSessionUser } from '@/services/supabase'
-import type { ResumeData, Experience, Education, Project, Certification, ReportRecord, EvidenceItem } from '@/types/resume'
+import { normalizeTemplate } from '@/components/templates'
+import GenuineScoreCard from '@/components/GenuineScoreCard'
+import type { ResumeData, Experience, Education, Project, Certification, ReportRecord, EvidenceItem, VerifiabilityResult } from '@/types/resume'
 
 const apiKeysToRecord = (apiKeys: NonNullable<ReturnType<typeof useAppStore.getState>['apiKeys']>) => ({
   provider: apiKeys.primaryProvider,
@@ -22,6 +25,7 @@ export default function ImportPage() {
   const addReport = useAppStore((s) => s.addReport)
   const setReportCloudId = useAppStore((s) => s.setReportCloudId)
   const addEvidence = useAppStore((s) => s.addEvidence)
+  const addCustomTemplate = useAppStore((s) => s.addCustomTemplate)
   const navigate = useNavigate()
 
   const [resumeText, setResumeText] = useState('')
@@ -33,11 +37,20 @@ export default function ImportPage() {
   const [loaded, setLoaded] = useState(false)
   const [evidenceCount, setEvidenceCount] = useState(0)
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([])
+  const [verifiability, setVerifiability] = useState<VerifiabilityResult | null>(null)
+  const [templateNameOpen, setTemplateNameOpen] = useState(false)
+  const [templateName, setTemplateName] = useState('')
+  const [templateSaved, setTemplateSaved] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const hasKeys = Boolean(apiKeys?.primaryKey)
   const editable = parsed
   const analysisSource = parsed ?? (resume.contact.fullName || resume.skills.length || resume.experience.length ? resume : null)
+  const heuristic = useMemo(() => {
+    if (!editable) return null
+    const { check } = shadowCheck(editable)
+    return check
+  }, [editable])
 
   const persistReport = async (report: ReportRecord) => {
     const user = await getSessionUser()
@@ -88,8 +101,9 @@ export default function ImportPage() {
     setError('')
     setLoading('analyze')
     try {
-      const result = await analyzeResume(analysisSource, apiKeysToRecord(apiKeys), targetUser ?? undefined)
+      const result = await analyzeResume(analysisSource, apiKeysToRecord(apiKeys), targetUser ?? undefined, evidenceItems)
       setAnalysis(result.analysis)
+      if (result.verifiability) setVerifiability(result.verifiability)
       const report = addReport({
         kind: 'resume-analysis',
         title: `${analysisSource.contact.fullName || 'Resume'} analysis — ${new Date().toLocaleDateString()}`,
@@ -121,6 +135,18 @@ export default function ImportPage() {
     persistReport(report)
     setLoaded(true)
     setTimeout(() => navigate('/builder'), 700)
+  }
+
+  const handleSaveAsTemplate = () => {
+    if (!editable) return
+    addCustomTemplate({
+      name: templateName.trim() || `${editable.contact.fullName || 'Imported resume'} template`,
+      resume: editable,
+    })
+    setTemplateName('')
+    setTemplateNameOpen(false)
+    setTemplateSaved(true)
+    setTimeout(() => setTemplateSaved(false), 2000)
   }
 
   return (
@@ -211,6 +237,10 @@ export default function ImportPage() {
         <AnalysisPanel analysis={analysis} />
       )}
 
+      {verifiability && (
+        <GenuineScoreCard verifiability={verifiability} />
+      )}
+
       {parsed && evidenceCount > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
           <Database className="h-4 w-4" />
@@ -222,7 +252,23 @@ export default function ImportPage() {
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-slate-900">Is this correct?</h2>
-            <p className="text-sm text-slate-500">Review and edit what the AI extracted, then load it into the builder.</p>
+            <div className="flex items-center gap-2">
+              {heuristic && (
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    heuristic.overall_score >= 70
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : heuristic.overall_score >= 45
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-red-50 text-red-700'
+                  }`}
+                  title="Deterministic offline estimate — labelled heuristic and never tuned by the LLM"
+                >
+                  <ClipboardCheck className="h-3.5 w-3.5" /> ATS {heuristic.overall_score} · heuristic
+                </span>
+              )}
+              <p className="text-sm text-slate-500">Review and edit what the AI extracted, then load it into the builder.</p>
+            </div>
           </div>
           <ParsedEditor value={editable} onChange={setParsed} />
           <div className="mt-5 flex items-center gap-3">
@@ -233,6 +279,44 @@ export default function ImportPage() {
               {loaded ? <Check className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
               {loaded ? 'Loading...' : 'Load into resume builder'}
             </button>
+            <div className="flex items-center gap-2">
+              {templateSaved ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                  <Check className="h-4 w-4" /> Saved to My templates
+                </span>
+              ) : templateNameOpen ? (
+                <>
+                  <input
+                    autoFocus
+                    value={templateName}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveAsTemplate()}
+                    placeholder="Template name"
+                    className="w-44 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={handleSaveAsTemplate}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setTemplateNameOpen(false)}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setTemplateNameOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Check className="h-4 w-4" />
+                  Save as custom template
+                </button>
+              )}
+            </div>
           </div>
         </section>
       )}
@@ -286,7 +370,8 @@ function normalizeParsed(raw: Partial<ResumeData>): ResumeData {
     education: edu,
     projects,
     certifications: certs,
-    template: raw.template === 'modern' ? 'modern' : 'classic',
+    notes: raw.notes ?? '',
+    template: normalizeTemplate(raw.template),
   }
 }
 
@@ -306,6 +391,12 @@ function ParsedEditor({ value, onChange }: { value: ResumeData; onChange: (r: Re
       </div>
 
       <Field label="Professional summary" textarea value={value.professionalSummary} onChange={(v) => set({ professionalSummary: v })} />
+      <Field
+        label="Notes (awards, languages, volunteer work, etc.)"
+        textarea
+        value={value.notes}
+        onChange={(v) => set({ notes: v })}
+      />
       <Field
         label="Skills (comma separated)"
         value={value.skills.join(', ')}
