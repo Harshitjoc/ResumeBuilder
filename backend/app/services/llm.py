@@ -2,8 +2,6 @@ import json
 import re
 from typing import Any
 
-from SimplerLLM.language import LLM, LLMProvider
-
 
 class LLMService:
     """Thin wrapper over SimplerLLM for the resume builder.
@@ -19,7 +17,9 @@ class LLMService:
         self.model = model
         self.llm = self._build()
 
-    def _build(self) -> LLM:
+    def _build(self) -> Any:
+        from SimplerLLM.language import LLM, LLMProvider
+
         provider_map = {
             "openai": LLMProvider.OPENAI,
             "anthropic": LLMProvider.ANTHROPIC,

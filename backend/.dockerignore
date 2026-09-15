@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.prod
+.env.local
+.env.*.bak
+data/
+tests/
+*.log
+Dockerfile
+.dockerignore
