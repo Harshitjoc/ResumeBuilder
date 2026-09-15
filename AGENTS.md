@@ -16,7 +16,7 @@ AI-powered resume builder. Users bring their own LLM API keys. Key features: res
 - **LLM:** SimplerLLM (multi-provider: OpenAI, Anthropic, Gemini, Ollama)
 - **Browser automation:** Browser-Use for form auto-fill (deferred, Phase 5)
 - **Extension:** Chrome extension via Plasmo (auto-fill: LinkedIn, Indeed, Workday, Greenhouse, Lever; tagged resume picker; track-application quick action)
-- **Deploy:** Vercel (frontend, `vercel.json`), Railway (backend, `railway.json`), Supabase (DB)
+- **Deploy:** **Paused — production not live; everything runs locally** (backend uvicorn on :8100, frontend dev server on :5173). Supabase **is** deployed (project `nknhmztsshosmunfpbip`, schema audited live). Deploy research findings: Render free tier refuses to deploy without a card; Back4app free tier **rotates the `.b4a.run` subdomain hourly** (verified: old URL 404s within the hour) and has no URL-discovery API — unusable for stable share links; Koyeb free instance is stable but requires a card on file ($29 pre-auth hold, then downgrade to Starter, never billed on the free service). The user's constraint is **no credit card**, so backend stays local until they choose a card-backed host (Koyeb free, Google Cloud Run free, or ~$2–7/mo paid like Fly.io/Render). `backend/Dockerfile` + `.dockerignore` exist and are deploy-ready.
 
 ## SimplerLLM Gotchas (verified)
 
