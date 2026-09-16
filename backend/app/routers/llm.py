@@ -14,6 +14,7 @@ from app.services.extract import (
     verifiable_claims,
 )
 from app.services.llm import LLMService
+from app.services.document_type import classify_document
 from app.services.prompts import (
     analyze_resume_prompt,
     ats_check_prompt,
@@ -102,6 +103,7 @@ class ParseResumeRequest(BaseModel):
     resumeText: str
     apiKeys: ApiKeys
     targetUser: str | None = None
+    force: bool = False
 
 
 class AnalyzeResumeRequest(BaseModel):
@@ -462,6 +464,18 @@ async def redesign_resume(req: RedesignResumeRequest):
 
 @router.post("/parse-resume")
 async def parse_resume(req: ParseResumeRequest):
+    classification = classify_document(req.resumeText)
+    if not req.force and not classification["is_resume_like"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "not_a_resume",
+                "kind": classification["kind"],
+                "reason": classification["reason"],
+                "signals": classification["signals"],
+            },
+        )
+
     llm = _service(req.apiKeys)
     try:
         raw = llm.generate_json(
@@ -482,7 +496,12 @@ async def parse_resume(req: ParseResumeRequest):
     parsed["contact"] = contact
     contact_confidence = build_contact_confidence(contact, extracted)
     evidence = build_evidence(parsed)
-    return {"parsed": parsed, "evidence": evidence, "contactConfidence": contact_confidence}
+    return {
+        "parsed": parsed,
+        "evidence": evidence,
+        "contactConfidence": contact_confidence,
+        "documentType": classification,
+    }
 
 
 @router.post("/analyze-resume")

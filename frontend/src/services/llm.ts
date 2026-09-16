@@ -13,9 +13,24 @@ import type {
   VerifiabilityResult,
   KeywordEntry,
   TruthSummary,
+  DocumentClassification,
 } from '@/types/resume'
 
 const BASE = import.meta.env.VITE_API_URL || ''
+
+export class NotAResumeError extends Error {
+  kind: string
+  reason: string
+  signals: string[]
+
+  constructor(kind: string, reason: string, signals: string[] = []) {
+    super(`not_a_resume (${kind}): ${reason}`)
+    this.name = 'NotAResumeError'
+    this.kind = kind
+    this.reason = reason
+    this.signals = signals
+  }
+}
 
 function extractDetail(raw: string): string {
   try {
@@ -48,6 +63,17 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { ...init, headers })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    let notAResume: NotAResumeError | null = null
+    try {
+      const parsedBody = JSON.parse(text)
+      const detail = parsedBody?.detail
+      if (detail && typeof detail === 'object' && detail.code === 'not_a_resume') {
+        notAResume = new NotAResumeError(detail.kind, detail.reason, detail.signals ?? [])
+      }
+    } catch {
+      // non-JSON error body
+    }
+    if (notAResume) throw notAResume
     const message = extractDetail(text) || `Request failed: ${res.status}`
     if (res.status === 429) {
       useAppStore.getState().setQuotaExceeded(true)
@@ -286,8 +312,9 @@ export async function parseResume(
   resumeText: string,
   apiKeys: Record<string, string>,
   targetUser?: TargetUser,
+  force?: boolean,
 ): Promise<ParseResumeResult> {
-  return post('/api/llm/parse-resume', { resumeText, apiKeys, targetUser })
+  return post('/api/llm/parse-resume', { resumeText, apiKeys, targetUser, force })
 }
 
 export interface ResumeAnalysis {
@@ -309,7 +336,7 @@ export async function analyzeResume(
   return post('/api/llm/analyze-resume', { resume, apiKeys, targetUser, evidence })
 }
 
-export async function extractResumeText(file: File): Promise<{ text: string }> {
+export async function extractResumeText(file: File): Promise<{ text: string; documentType?: DocumentClassification }> {
   const form = new FormData()
   form.append('file', file)
   const headers: Record<string, string> = {}

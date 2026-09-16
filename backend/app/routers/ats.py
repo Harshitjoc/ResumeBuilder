@@ -8,6 +8,7 @@ from app import config
 from app.deps import AuthContext, get_user_http
 from app.routers.llm import _coerce_ats_check, _service, ApiKeys
 from app.routers.upload import _extract_docx, _extract_pdf
+from app.services.document_type import classify_document
 from app.services.entitlements import get_plan, is_pro
 from app.services.prompts import file_ats_prompt, sanitize_target_user
 from app.services.shadow import shadow_check
@@ -116,6 +117,18 @@ async def ats_file(
 
     if not text:
         raise HTTPException(status_code=422, detail="No readable text found in the file")
+
+    classification = classify_document(text)
+    if not classification["is_resume_like"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "not_a_resume",
+                "kind": classification["kind"],
+                "reason": classification["reason"],
+                "signals": classification["signals"],
+            },
+        )
 
     det = _deterministic_checks(text)
 

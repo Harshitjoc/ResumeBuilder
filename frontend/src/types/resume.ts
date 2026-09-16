@@ -185,10 +185,20 @@ export interface ContactConfidence {
   website: number
 }
 
+export interface DocumentClassification {
+  kind: 'resume' | 'cover-letter' | 'job-posting' | 'other'
+  is_resume_like: boolean
+  confidence: number
+  signals: string[]
+  reason: string
+  score: number
+}
+
 export interface ParseResumeResult {
   parsed: ResumeData
   evidence: EvidenceItem[]
   contactConfidence: ContactConfidence
+  documentType?: DocumentClassification
 }
 
 export interface VerificationChange {

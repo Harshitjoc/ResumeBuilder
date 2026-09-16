@@ -1,15 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, FileText, Sparkles, Loader2, Check, Wand2, Database, ClipboardCheck } from 'lucide-react'
+import { Upload, FileText, Sparkles, Loader2, Check, Wand2, Database, ClipboardCheck, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import ApiKeyManager from '@/components/ApiKeyManager'
 import AnalysisPanel from '@/components/reports/AnalysisPanel'
-import { parseResume, analyzeResume, extractResumeText, type ResumeAnalysis } from '@/services/llm'
+import { parseResume, analyzeResume, extractResumeText, NotAResumeError, type ResumeAnalysis } from '@/services/llm'
 import { shadowCheck } from '@/services/shadowAts'
 import { saveAnalysisReport, getSessionUser } from '@/services/supabase'
 import { normalizeTemplate } from '@/components/templates'
 import GenuineScoreCard from '@/components/GenuineScoreCard'
-import type { ResumeData, Experience, Education, Project, Certification, ReportRecord, EvidenceItem, VerifiabilityResult } from '@/types/resume'
+import type { ResumeData, Experience, Education, Project, Certification, ReportRecord, EvidenceItem, VerifiabilityResult, DocumentClassification } from '@/types/resume'
 
 const apiKeysToRecord = (apiKeys: NonNullable<ReturnType<typeof useAppStore.getState>['apiKeys']>) => ({
   provider: apiKeys.primaryProvider,
@@ -41,6 +41,9 @@ export default function ImportPage() {
   const [templateNameOpen, setTemplateNameOpen] = useState(false)
   const [templateName, setTemplateName] = useState('')
   const [templateSaved, setTemplateSaved] = useState(false)
+  const [docType, setDocType] = useState<DocumentClassification | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDoc, setPendingDoc] = useState<{ kind: string; reason: string; signals: string[] } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const hasKeys = Boolean(apiKeys?.primaryKey)
@@ -65,11 +68,12 @@ export default function ImportPage() {
     setError('')
     setLoading('extract')
     try {
-      const { text } = await extractResumeText(f)
-      setResumeText(text)
+      const result = await extractResumeText(f)
+      setResumeText(result.text)
       setFileName(f.name)
       setParsed(null)
       setAnalysis(null)
+      setDocType(result.documentType ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not extract text from the file')
     } finally {
@@ -77,19 +81,27 @@ export default function ImportPage() {
     }
   }
 
-  const handleParse = async () => {
+  const handleParse = async (force = false) => {
     if (!apiKeys || !resumeText.trim()) return
     setError('')
     setLoading('parse')
     try {
-      const result = await parseResume(resumeText, apiKeysToRecord(apiKeys), targetUser ?? undefined)
+      const result = await parseResume(resumeText, apiKeysToRecord(apiKeys), targetUser ?? undefined, force)
       setParsed(normalizeParsed(result.parsed))
       const ev = Array.isArray(result.evidence) ? result.evidence : []
       setEvidenceCount(ev.length)
       setEvidenceItems(ev)
       setAnalysis(null)
+      setDocType(result.documentType ?? null)
+      setConfirmOpen(false)
+      setPendingDoc(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Parsing failed')
+      if (e instanceof NotAResumeError) {
+        setPendingDoc({ kind: e.kind, reason: e.reason, signals: e.signals })
+        setConfirmOpen(true)
+      } else {
+        setError(e instanceof Error ? e.message : 'Parsing failed')
+      }
     } finally {
       setLoading(null)
     }
@@ -188,6 +200,9 @@ export default function ImportPage() {
             setResumeText(e.target.value)
             setParsed(null)
             setAnalysis(null)
+            setDocType(null)
+            setConfirmOpen(false)
+            setPendingDoc(null)
           }}
           placeholder="Paste the full text of your existing resume here..."
           className="mt-4 min-h-64 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
@@ -195,7 +210,7 @@ export default function ImportPage() {
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
-            onClick={handleParse}
+            onClick={() => handleParse()}
             disabled={!hasKeys || !resumeText.trim() || loading !== null}
             className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
           >
@@ -228,6 +243,25 @@ export default function ImportPage() {
           </div>
         )}
       </section>
+
+      {docType && !docType.is_resume_like && !parsed && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">{docType.reason}</p>
+              <p className="mt-0.5 text-amber-800">
+                {docType.kind === 'job-posting' &&
+                  'This looks like a job posting — use Job Analysis from the Jobs page instead.'}
+                {docType.kind === 'cover-letter' &&
+                  'Cover letters belong in the Cover Letter tool, not a resume.'}
+                {docType.kind === 'other' &&
+                  'We could not find resume sections (summary, experience, education, skills). Scanned PDFs that are images are not supported.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
@@ -319,6 +353,48 @@ export default function ImportPage() {
             </div>
           </div>
         </section>
+      )}
+
+      {confirmOpen && pendingDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <h3 className="text-base font-semibold text-slate-900">Doesn't look like a resume</h3>
+            </div>
+            <p className="mt-2 text-sm text-slate-700">{pendingDoc.reason}</p>
+            {pendingDoc.signals.length > 0 && (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                {pendingDoc.signals.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-3 text-xs text-slate-500">
+              Parsing a non-resume document will not produce a usable resume. Only continue if this really is a
+              resume the detector missed.
+            </p>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setConfirmOpen(false)
+                  setPendingDoc(null)
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleParse(true)}
+                disabled={loading === 'parse'}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+              >
+                {loading === 'parse' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Parse anyway
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

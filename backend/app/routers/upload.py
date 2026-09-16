@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile
 
+from app.services.document_type import classify_document
+
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
 MAX_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -53,4 +55,4 @@ async def extract_resume_text(file: UploadFile):
     if not text:
         raise HTTPException(status_code=422, detail="No readable text found in the file (scan/OCR images not supported)")
 
-    return {"filename": file.filename, "text": text}
+    return {"filename": file.filename, "text": text, "documentType": classify_document(text)}
