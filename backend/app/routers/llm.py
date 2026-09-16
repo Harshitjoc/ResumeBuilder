@@ -60,6 +60,7 @@ class ApiKeys(BaseModel):
     provider: str
     apiKey: str | None = None
     model: str | None = None
+    baseUrl: str | None = None
 
 
 class GenerateSummaryRequest(BaseModel):
@@ -140,7 +141,12 @@ class GenerateInterviewPrepRequest(BaseModel):
 
 def _service(keys: ApiKeys) -> LLMService:
     try:
-        return LLMService(provider=keys.provider, api_key=keys.apiKey, model=keys.model)
+        return LLMService(
+            provider=keys.provider,
+            api_key=keys.apiKey,
+            model=keys.model,
+            base_url=keys.baseUrl,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

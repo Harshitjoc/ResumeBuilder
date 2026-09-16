@@ -28,4 +28,8 @@ UPI_CURRENCY: str = os.getenv("UPI_CURRENCY", "INR")
 SUBSCRIPTION_MONTHS: int = int(os.getenv("SUBSCRIPTION_MONTHS", "12"))
 ENABLE_ENTITLEMENTS: str = os.getenv("ENABLE_ENTITLEMENTS", "true")
 FREE_DAILY_LLM: int = int(os.getenv("FREE_DAILY_LLM", "25"))
+# OpenAI-compatible base URL for the "omniroute" provider (hosted gateway e.g.
+# https://omnirouters.com/v1, or a local proxy such as http://localhost:20128/v1).
+# A per-request "baseUrl" in the apiKeys payload overrides this.
+OMNIROUTE_BASE_URL: str = os.getenv("OMNIROUTE_BASE_URL", "https://omnirouters.com/v1")
 EXT_SYNC_SECRET: str = os.getenv("EXT_SYNC_SECRET", SUPABASE_JWT_SECRET or "dev-ext-sync-secret")

@@ -29,7 +29,26 @@ const PROVIDERS = [
     // relay serving a different Ollama (and a different model set).
     keyLabel: 'http://127.0.0.1:11434',
   },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    models: [
+      'openai/gpt-4o-mini',
+      'openai/gpt-4o',
+      'anthropic/claude-3-5-sonnet',
+      'anthropic/claude-3-7-sonnet',
+    ],
+    keyLabel: 'sk-or-...',
+  },
+  {
+    id: 'omniroute',
+    name: 'OmniRoute',
+    models: [],
+    keyLabel: 'omni-...',
+  },
 ]
+
+const FREE_TEXT_MODEL_PROVIDERS = new Set(['ollama', 'omniroute'])
 
 export default function ApiKeyManager() {
   const apiKeys = useAppStore((s) => s.apiKeys)
@@ -44,7 +63,7 @@ export default function ApiKeyManager() {
 
   const handleProviderChange = (id: string) => {
     setProvider(id)
-    setModel(PROVIDERS.find((p) => p.id === id)?.models[0] ?? '')
+    setModel(FREE_TEXT_MODEL_PROVIDERS.has(id) ? 'auto' : (PROVIDERS.find((p) => p.id === id)?.models[0] ?? ''))
   }
 
   const save = () => {
@@ -91,11 +110,11 @@ export default function ApiKeyManager() {
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700">Model</label>
-          {provider === 'ollama' ? (
+          {FREE_TEXT_MODEL_PROVIDERS.has(provider) ? (
             <input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g. qwen3:0.6b, llama3.1"
+              placeholder={provider === 'ollama' ? 'e.g. qwen3:0.6b, llama3.1' : 'e.g. auto or an enabled model'}
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm"
             />
           ) : (
